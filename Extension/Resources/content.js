@@ -450,6 +450,28 @@
     pump();
   }
 
+  /* Collects elements from the light DOM *and* from open shadow roots.
+   *
+   * querySelectorAll cannot see into a shadow tree, so a reader that renders its
+   * pages inside a web component looks exactly like a page that has no images at
+   * all -- which is how an entire site reports "0 görsel tarandı" and nothing
+   * ever gets translated. Depth is bounded because shadow trees nest. */
+  function collectAll(selector, out, root, depth) {
+    out = out || [];
+    root = root || document;
+    depth = depth || 0;
+    if (depth > 6) return out;
+
+    var found = root.querySelectorAll(selector);
+    for (var i = 0; i < found.length; i++) out.push(found[i]);
+
+    var hosts = root.querySelectorAll("*");
+    for (var j = 0; j < hosts.length; j++) {
+      if (hosts[j].shadowRoot) collectAll(selector, out, hosts[j].shadowRoot, depth + 1);
+    }
+    return out;
+  }
+
   /* Site-independent escape hatch, wired to the popup's "Bu sayfayı çevir".
    *
    * Automatic detection depends on the page image intersecting the viewport.
@@ -460,7 +482,7 @@
    * observer and the size heuristics and simply takes the largest pictures that
    * are actually painted on screen. */
   function forceRun() {
-    var images = document.querySelectorAll("img");
+    var images = collectAll("img");
     var painted = [];
     for (var i = 0; i < images.length; i++) {
       var img = images[i];
@@ -492,7 +514,7 @@
 
     return {
       images: images.length,
-      canvases: document.querySelectorAll("canvas").length,
+      canvases: collectAll("canvas").length,
       painted: painted.length,
       queued: targets.length
     };
@@ -519,7 +541,10 @@
 
   function scan() {
     if (!settings.enabled) return;
-    var images = document.querySelectorAll("img");
+    /* Shadow-aware for the same reason forceRun is: a reader that hides its
+       pages in a web component would otherwise never be picked up by the
+       automatic pass either. */
+    var images = collectAll("img");
     var observer = ensureObserver();
     var eligible = 0;
     for (var i = 0; i < images.length; i++) {
@@ -531,7 +556,7 @@
     }
     diagStats.images = images.length;
     diagStats.eligible = eligible;
-    diagStats.canvases = document.querySelectorAll("canvas").length;
+    diagStats.canvases = collectAll("canvas").length;
   }
 
   function scheduleScan() {
@@ -593,8 +618,8 @@
     if (message.type === "ping") {
       sendResponse({
         ok: true,
-        images: document.querySelectorAll("img").length,
-        canvases: document.querySelectorAll("canvas").length
+        images: collectAll("img").length,
+        canvases: collectAll("canvas").length
       });
       return false;
     }
@@ -607,6 +632,16 @@
     }
 
     if (message.type === "ocr:run") {
+      /* A frame with nothing in it stays silent on purpose.
+       *
+       * The content script runs in every frame, and tabs.sendMessage resolves
+       * with whichever frame answers first. On a site whose reader lives in an
+       * iframe, the empty top document used to win the race and report "0 görsel
+       * tarandı" while the frame holding the actual page went unheard. Not
+       * answering lets the capable frame speak; if nobody answers, the caller
+       * knows no frame had anything to do. */
+      if (!collectAll("img").length && !collectAll("canvas").length) return false;
+
       /* Settings are re-read here rather than trusted from the closure, because
        * this listener can fire before -- or instead of -- start() succeeding. */
       refreshSettings()

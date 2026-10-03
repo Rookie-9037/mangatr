@@ -142,11 +142,20 @@
           .then(function (pong) {
             return MangaTR.api().tabs.sendMessage(tabId, { type: "ocr:run" }).then(function (reply) {
               if (!reply) {
-                throw new Error(
-                  pong
-                    ? "MangaTR sayfada yüklü ama yanıt vermiyor — sayfayı yenile"
-                    : "Bu sayfada MangaTR çalışmıyor. Safari → Ayarlar → Eklentiler → MangaTR " +
+                if (!pong) {
+                  throw new Error(
+                    "Bu sayfada MangaTR çalışmıyor. Safari → Ayarlar → Eklentiler → MangaTR " +
                       "→ bu siteye izin ver"
+                  );
+                }
+                /* The script answered the ping, so it is injected. Silence here
+                   means every frame agreed it had no page image at all -- either
+                   the reader draws to a canvas or the manga page was never
+                   actually opened (a chapter list has no <img> at all). */
+                throw new Error(
+                  "Sayfanın hiçbir yerinde <img> yok. Manga bölümünü aç (bölüm listesi " +
+                    "değil) veya okuyucu canvas kullanıyor — " +
+                    (pong.canvases ? pong.canvases + " canvas bulundu" : "canvas da yok")
                 );
               }
               if (reply.ok === false && reply.error) throw new Error(reply.error);

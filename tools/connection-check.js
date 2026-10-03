@@ -265,9 +265,9 @@ send({ type: "settings:test" }).then(function (reply) {
     check("sayfaya doğru mesaj gönderildi", tabMessages[1].message.type === "ocr:run");
     check("kuyruk bilisi döndü", reply.ok === true && reply.result.queued === 2, JSON.stringify(reply));
 
-    /* A PDF viewer or a chrome:// page has no content script, and the page's own
-     * scripts may answer instead. Both look like an empty reply, and an empty
-     * reply used to read as success. */
+    /* No content script at all -- a PDF viewer, a chrome:// page, or a site the
+     * extension was never permitted on. Ping fails too, which is the only thing
+     * that distinguishes this from "every frame had nothing to do". */
     tabMessages = [];
     tabReply = () => undefined;
     return send({ type: "ocr:run" });
@@ -277,19 +277,35 @@ send({ type: "settings:test" }).then(function (reply) {
     check("önce ping atıldı", tabMessages.length === 2 && tabMessages[0].message.type === "ping",
       JSON.stringify(tabMessages.map((m) => m.message.type)));
 
-    /* Script present but not answering: a reload is the fix, a permission
-     * change is not, so the two must not read the same. */
+    /* Reader inside an iframe: the top document has no images and must stay
+     * quiet so the frame that does have the page can answer. */
     tabMessages = [];
-    tabReply = () => undefined;
     ctx.browser.tabs.sendMessage = (id, message) => {
       tabMessages.push({ id: id, message: message });
-      if (message.type === "ping") return Promise.resolve({ ok: true, images: 9, canvases: 1 });
+      if (message.type === "ping") return Promise.resolve({ ok: true, images: 0, canvases: 0 });
+      return Promise.resolve({ ok: true, images: 3, canvases: 0, painted: 1, queued: 1 });
+    };
+    return send({ type: "ocr:run" });
+  }).then(function (reply) {
+    check("çerçeve içindeki okuyucudan kuyruk geldi",
+      reply.ok === true && reply.result.queued === 1, JSON.stringify(reply));
+
+    /* Script present in every frame, no frame has a page image: a chapter list,
+     * or a canvas reader. Saying "reload" here would send the user in circles. */
+    tabMessages = [];
+    ctx.browser.tabs.sendMessage = (id, message) => {
+      tabMessages.push({ id: id, message: message });
+      if (message.type === "ping") return Promise.resolve({ ok: true, images: 0, canvases: 2 });
       return Promise.resolve(undefined);
     };
     return send({ type: "ocr:run" });
   }).then(function (reply) {
-    check("betik yüklü ama sağırsa yenileme öneriliyor",
-      reply.ok === false && /yenile/i.test(reply.error), reply.error);
+    check("hiçbir çerçevede görsel yoksa bölüm ipucu veriyor",
+      reply.ok === false && /hiçbir yerinde <img> yok/.test(reply.error), reply.error);
+    check("canvas okuyucu varsa sayısı söylendi", /2 canvas bulundu/.test(reply.error), reply.error);
+    check("canvas ipucu karıştırılmadı", !/yenile/i.test(reply.error), reply.error);
+
+    tabMessages = [];
     ctx.browser.tabs.sendMessage = (id, message) => {
       tabMessages.push({ id: id, message: message });
       return Promise.resolve(tabReply());
