@@ -21,6 +21,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The JavaScript half is where most of the product lives, and the Swift
+      # build says nothing about it. These suites run on every push: they caught a
+      # reply that was read outside its { ok, result } envelope, which would have
+      # shipped as "OCR silently finds nothing" rather than as a build failure.
+      - name: JavaScript testleri
+        run: |
+          set -e
+          for f in Extension/Resources/*.js tools/*.js; do node --check "$f"; done
+          for suite in lang-check translate-check overlay-check preview-check \
+                       popup-check connection-check vision-check; do
+            echo "--- $suite ---"
+            node "tools/$suite.js"
+          done
+
       - name: XcodeGen kur
         run: brew install xcodegen
 

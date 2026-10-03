@@ -53,6 +53,18 @@ var MangaTROCR = (function () {
     });
   }
 
+  /* Same decision as canvasToBytes, but the mime has to travel with the bytes
+   * once they are an API payload instead of a native Vision request. */
+  function canvasToPayload(canvas) {
+    var useJpeg = canvas.width * canvas.height > 1200000;
+    var mime = useJpeg ? "image/jpeg" : "image/png";
+    return canvasToBlob(canvas, mime, 0.92).then(function (blob) {
+      return blob.arrayBuffer().then(function (buffer) {
+        return { b64: arrayBufferToBase64(buffer), mime: mime };
+      });
+    });
+  }
+
   /* Webtoon pages are vertical strips: a 800x20000 episode chapter is normal.
    * Scaling the longest edge down to fit one Vision pass would leave ~100px of
    * width and produce garbage, so tall images are cut into overlapping vertical
@@ -97,6 +109,20 @@ var MangaTROCR = (function () {
     return canvasToBytes(canvas);
   }
 
+  function tilePayload(source, tile, scale) {
+    var width = Math.max(1, Math.round(source.naturalWidth * scale));
+    var height = Math.max(1, Math.round(tile.height * scale));
+
+    var canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return Promise.reject(new Error("2D bağlamı yok"));
+    ctx.drawImage(source, 0, tile.y, source.naturalWidth, tile.height, 0, 0, width, height);
+
+    return canvasToPayload(canvas);
+  }
+
   function runTile(source, tile, scale, lang) {
     return tileBytes(source, tile, scale).then(function (buffer) {
       return chunkedNativeTransfer(arrayBufferToBase64(buffer), lang).then(function (reply) {
@@ -114,6 +140,41 @@ var MangaTROCR = (function () {
             width: box.w * scaleX,
             height: box.h * scaleY,
             confidence: box.c
+          };
+        });
+      });
+    });
+  }
+
+  /* The same page read by a vision model instead of Vision. Needed because the
+   * native handler lives in an app extension, and a free Apple ID cannot sign
+   * one: the extension process dies on launch and OCR never becomes available.
+   *
+   * Tiles, overlap and seam de-duplication are reused unchanged. Only the
+   * recognition call differs, and it happens in the background page because
+   * that is where the provider code lives. */
+  function runTileRemote(source, tile, scale) {
+    return tilePayload(source, tile, scale).then(function (payload) {
+      return MangaTR.send({ type: "ocr:vision", image: payload }).then(function (reply) {
+        if (!reply || !reply.ok) throw new Error((reply && reply.error) || "OCR başarısız");
+        // The background hub wraps every reply in { ok, result }.
+        var blocks = (reply.result && reply.result.blocks) || [];
+
+        // Normalised 0..1 top-left values come back; everything downstream works
+        // in whole-image pixels, so scale and lift out of tile space here.
+        var tileWidth = Math.max(1, Math.round(source.naturalWidth * scale));
+        var tileHeight = Math.max(1, Math.round(tile.height * scale));
+
+        return (blocks || []).map(function (block) {
+          return {
+            text: block.text,
+            x: block.x * tileWidth,
+            y: tile.y + block.y * tileHeight,
+            width: block.w * tileWidth,
+            height: block.h * tileHeight,
+            // The model never states its own confidence; clustering and the
+            // overlay treat anything non-zero as "keep it".
+            confidence: 0.9
           };
         });
       });
@@ -222,8 +283,12 @@ var MangaTROCR = (function () {
     });
   }
 
-  /* Tiles are recognised in order so the pill can say how far along it is. */
-  function recognize(img, settings, onProgress) {
+  /* Tiles are recognised in order so the pill can say how far along it is.
+   *
+   * `remote` picks the recognition backend. Vision is preferred because it is
+   * free, fast and needs no key; the vision-model path is the fallback that
+   * keeps the extension usable when the native handler cannot run. */
+  function recognize(img, settings, onProgress, remote) {
     if (!isRenderable(img)) {
       return Promise.reject(new Error("Görsel henüz yüklenmedi"));
     }
@@ -231,6 +296,7 @@ var MangaTROCR = (function () {
     var options = settings || {};
     var lang = options.sourceLanguages || "auto";
     var plan = tilePlan(img.naturalWidth, img.naturalHeight);
+    var runTileFn = remote ? runTileRemote : runTile;
 
     // Prefer the already-decoded <img> and only pay for a network round trip if its
     // canvas turns out to be tainted. The probe is done once, not per tile,
@@ -256,7 +322,7 @@ var MangaTROCR = (function () {
 
         plan.tiles.forEach(function (tile, index) {
           chain = chain.then(function () {
-            return runTile(source, tile, plan.scale, lang).then(function (boxes) {
+            return runTileFn(source, tile, plan.scale, lang).then(function (boxes) {
               collected = collected.concat(boxes);
               // A 20-tile webtoon takes a while, and a silent page reads as a
               // broken one.

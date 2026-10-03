@@ -100,6 +100,28 @@
       });
     },
 
+    /* Page OCR when Vision is unavailable, done by a vision model instead. The
+     * image arrives as base64 from the content script because that is the only
+     * side that can put it on a canvas without tainting it. */
+    "ocr:vision": function (message) {
+      return MangaTR.getSettings().then(function (settings) {
+        var resolved = MangaTRTranslate.resolveSettings(settings);
+        if (!resolved.key) throw new Error("Önce API anahtarını kaydet");
+        if (!MangaTRProviders.visionOCR) {
+          throw new Error("Bu sürümde görsel okuma yok");
+        }
+        return MangaTRProviders.visionOCR(
+          MangaTRProviders.get(resolved.id),
+          resolved.model,
+          resolved.key,
+          message.image,
+          {}
+        ).then(function (blocks) {
+          return { blocks: blocks };
+        });
+      });
+    },
+
     "image:fetch": function (message) {
       return fetchImageBytes(message.url, message.referer).catch(function (error) {
         return { ok: false, error: String(error.message || error) };

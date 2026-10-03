@@ -325,30 +325,26 @@
 
     return MangaTR.nativeAvailable()
       .then(function (available) {
-        if (!available) {
-          if (!nativeWarned) {
-            nativeWarned = true;
-            /* Named after the containing app because that is the usual fix:
-               iOS will not bring up the extension host for a sideloaded app
-               until the app itself has been launched once. The reason from the
-               failed message rides along so a real bridge failure is
-               distinguishable from that. */
-            setPill(
-              "MangaTR: OCR bağlantısı yok (" +
-                (MangaTR.nativeErrorText() || "bilinmeyen") +
-                ") — MangaTR uygulamasını bir kez aç",
-              true
-            );
-          }
-          unwrap(entry, img);
-          return null;
+        /* Vision needs the app extension, which a free Apple ID cannot sign: the
+           process is killed on launch. Rather than refusing to work, fall back to
+           reading the page with a vision model. Slower and it uploads the page
+           image, but it is the difference between translating and not. */
+        var remote = !available;
+        if (remote && !nativeWarned) {
+          nativeWarned = true;
+          setPill(
+            "MangaTR: cihazda OCR yok (" +
+              (MangaTR.nativeErrorText() || "bilinmeyen") +
+              ") — görseli Gemini ile okuyorum",
+            true
+          );
         }
 
         return MangaTROCR.recognize(img, settings, function (done, total) {
           // blocks is not known yet at this point, so the count is left out;
           // what matters here is that something is visibly happening.
           setPill("MangaTR: sayfa okunuyor " + done + "/" + total + " parça…");
-        }).then(function (result) {
+        }, remote).then(function (result) {
           var blocks = MangaTROverlay.clusterBoxes(result.boxes || []);
           if (!blocks.length) {
             /* Used to be a completely silent no-op: the overlay was removed and

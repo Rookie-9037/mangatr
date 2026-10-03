@@ -12,7 +12,7 @@ yayımlanmış gibi okunur.
 | Aşama | Nerede | Ne oluyor |
 |---|---|---|
 | Görsel bulma | Content script | Sadece manga sayfası gibi büyük görselleri işler, sayfaya neredeyse dokunmaz |
-| OCR | Cihaz içi (Vision) | 10 dilli tanıma, dikey (tategaki) metin desteği, sunucuya görsel gitmez |
+| OCR | Cihaz içi (Vision), yoksa Gemini | 10 dilli tanıma, dikey (tategaki) metin desteği. Vision çalışmıyorsa sayfa görseli seçili modele gider |
 | Dil algılama | Content script + model | Betik imzası (kana/hangul/han) kesin, Latin diller stopword + model tahmini |
 | Kümeleştirme | Content script | Vision'ın çevirdiği satır parçaları tek balonda birleştirilir |
 | Çeviri | Seçilen servis | Gemini / DeepSeek / Groq / OpenRouter / kendi sunucun; JSON şemasıyla toplu istek |
@@ -170,6 +170,13 @@ Eklenti simgesi (Safari'de "puzzle" veya `Aa` menüsü) üzerinden:
 - Dikey Japonca metin yatay Türkçe olarak çizilir. Bu bilinçli bir tercih: dikey
   Latin harfleri okunmuyor.
 - Çeviri tamamen cihazda değil, seçtiğin servis üzerinden ağ ile yapılır. Metin
-  gönderilir, görsel gönderilmez.
+  gönderilir.
+- **OCR iki yoldan birini kullanır.** Cihaz içi Vision tercih edilir, ama Vision
+  `MangaTRExtension.appex` içinde çalışır ve **ücretsiz bir Apple ID app extension
+  imzalayamaz** — eklenti açılışta öldürülür (`Launched process exited during
+  launch`). Bu durumda eklenti geri düşer: sayfa görseli parçalara bölünüp
+  **Gemini'ye gönderilir** ve oradan metin + konum alınır. Sonuç: görsel de
+  Google'a çıkar, yavaştır ve kutular model tahminidir; Vision kadar kesin değildir.
+  Bu yol yalnız Gemini'de çalışır, başka servisler görsel okuyamaz.
 - Önizleme aracı `<canvas>`, CSS arka planı veya sayfanın kendi metnini değil,
   yalnızca `<img>` içindeki görseli işler — iOS'taki seçici de aynı sınırla.

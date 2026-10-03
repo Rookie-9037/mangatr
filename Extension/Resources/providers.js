@@ -74,6 +74,13 @@ var MangaTRProviders = (function () {
     return fenced ? fenced[1] : trimmed;
   }
 
+  /* Models estimate boxes freely: -0.05 for something hanging off the left edge,
+   * 1.4 for one that runs past the page. Clamping here keeps a bad number from
+   * turning into a balloon drawn in the wrong place. */
+  function clamp01(value) {
+    return Math.min(1, Math.max(0, value));
+  }
+
   var CHAT_SYSTEM = [
     "Sen profesyonel bir çevirmensin. Konuşma balonlarını ve anlatım kutularını kaynak dilden doğal, akıcı Türkçeye çevirirsin.",
     "Her zaman JSON nesnesi döndür: { \"lang\": \"<kaynak dil kodu>\", \"items\": [ { \"id\": 0, \"tr\": \"...\" } ] }",
@@ -101,6 +108,42 @@ var MangaTRProviders = (function () {
     required: ["lang", "items"]
   };
 
+  /* Boxes come back normalised to 0..1 with the origin at the TOP-LEFT. Vision
+   * reports them bottom-left, so this is stated explicitly in the prompt and
+   * differs from the native path on purpose — normalising here keeps every
+   * downstream consumer working in one coordinate space. */
+  var VISION_SCHEMA = {
+    type: "object",
+    properties: {
+      blocks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            x: { type: "number" },
+            y: { type: "number" },
+            w: { type: "number" },
+            h: { type: "number" }
+          },
+          required: ["text", "x", "y", "w", "h"]
+        }
+      }
+    },
+    required: ["blocks"]
+  };
+
+  var VISION_PROMPT = [
+    "Bu bir manga sayfası. Görselde okunan HER ayrı metni kutularıyla birlikte döndür.",
+    "Kurallar:",
+    "- Her konuşma balonu, ses efekti veya metin kutusu için AYRI bir kayıt yaz; birleştirme.",
+    "- Metni gördüğün gibi yaz: çevirme, düzeltme, kısaltma yapma.",
+    "- x, y, w, h değerleri 0 ile 1 arasında normalize edilmiştir.",
+    "- x ve y kutunun SOL-ÜST köşesidir; w ve h genişlik ve yüksekliktir.",
+    "- Metin yoksa blocks boş bir dizi olsun.",
+    "Sadece şu biçimde yanıt ver: {\"blocks\":[{\"text\":\"...\",\"x\":0.1,\"y\":0.2,\"w\":0.3,\"h\":0.05}]}"
+  ].join("\n");
+
 /* Declared as its own variable rather than inline in the list below, so the
  * request body can name it without depending on `this`. */
 var GEMINI = {
@@ -124,6 +167,84 @@ var GEMINI = {
   ],
   defaultModel: "gemini-3.8-flash",
   system: CHAT_SYSTEM,
+  /* The only provider that can look at a picture. Everything else here is
+   * text-only, which is why OCR needs this one and not a generic capability. */
+  supportsVision: true,
+
+  /* Image reading for the fallback OCR path. Same endpoint and key header as
+   * the chat call; the difference is an inline image part and a schema that
+   * asks for boxes instead of translations. */
+  visionRequest: function (image, model, key, settings) {
+    if (!image || !image.b64) throw new Error("Görsel verisi yok");
+    var options = settings || {};
+    return {
+      url:
+        "https://generativelanguage.googleapis.com/v1beta/models/" +
+        encodeURIComponent(model) +
+        ":generateContent",
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { inlineData: { mimeType: image.mime || "image/png", data: image.b64 } },
+                { text: VISION_PROMPT }
+              ]
+            }
+          ],
+          generationConfig: {
+            maxOutputTokens: 8192,
+            temperature: 0,
+            responseMimeType: "application/json",
+            responseSchema: VISION_SCHEMA
+          }
+        })
+      }
+    };
+  },
+
+  visionParse: function (payload) {
+    var candidates = (payload && payload.candidates) || [];
+    for (var i = 0; i < candidates.length; i++) {
+      var parts = (candidates[i].content && candidates[i].content.parts) || [];
+      for (var j = 0; j < parts.length; j++) {
+        if (!parts[j].text) continue;
+        try {
+          var parsed = JSON.parse(stripFence(parts[j].text));
+          if (parsed && Array.isArray(parsed.blocks)) {
+            return {
+              blocks: parsed.blocks
+                .filter(function (block) {
+                  return (
+                    block &&
+                    typeof block.text === "string" &&
+                    block.text.trim() &&
+                    [block.x, block.y, block.w, block.h].every(function (n) {
+                      return typeof n === "number" && isFinite(n);
+                    })
+                  );
+                })
+                .map(function (block) {
+                  return {
+                    text: String(block.text).trim(),
+                    x: clamp01(block.x),
+                    y: clamp01(block.y),
+                    w: clamp01(block.w),
+                    h: clamp01(block.h)
+                  };
+                })
+            };
+          }
+        } catch (error) {
+          /* try the next part */
+        }
+      }
+    }
+    return null;
+  },
 
   request: function (prompt, model, key, options) {
     var settings = options || {};
@@ -297,16 +418,19 @@ var PROVIDERS = [
     return null;
   }
 
-  /* One place that talks to a vendor, shared by the popup's "Test et" and the
-   * real translation path. Keeping them separate is what let "Test et" give up
-   * on the first 503 while a page translation carried on retrying. */
-  function send(provider, model, key, prompt, options) {
+  /* One place that talks to a vendor, shared by the popup's "Test et", the real
+   * translation path and the image-reading OCR. Keeping them separate is what let
+   * "Test et" give up on the first 503 while a page translation carried on.
+   *
+   * `build(model)` returns { url, init }, which is the only difference between a
+   * text call and an image call — the recovery policy is shared on purpose. */
+  function sendWith(provider, model, key, build, options) {
     var tried = [];
     var hops = 0;
     var attempt = 0;
 
     function step() {
-      var request = provider.request(prompt, model, key, options);
+      var request = build(model);
       return fetch(request.url, request.init).then(function (response) {
         if (response.ok) {
           if (options && typeof options.onSuccessModel === "function") {
@@ -334,6 +458,42 @@ var PROVIDERS = [
     }
 
     return step();
+  }
+
+  function send(provider, model, key, prompt, options) {
+    return sendWith(
+      provider,
+      model,
+      key,
+      function (m) {
+        return provider.request(prompt, m, key, options);
+      },
+      options
+    );
+  }
+
+  /* Reads text boxes out of a page image with a vision model. Returns blocks in
+   * normalised 0..1 top-left space; the caller maps them onto the tile. */
+  function visionOCR(provider, model, key, image, options) {
+    if (!provider || !provider.supportsVision || !provider.visionRequest) {
+      throw new Error(
+        (provider ? provider.label : "Bu servis") +
+          " görsel okuyamıyor. OCR için Google Gemini seç."
+      );
+    }
+    return sendWith(
+      provider,
+      model,
+      key,
+      function (m) {
+        return provider.visionRequest(image, m, key, options);
+      },
+      options
+    ).then(function (payload) {
+      var parsed = provider.visionParse(payload);
+      if (!parsed) throw new Error("Görselden metin okunamadı");
+      return parsed.blocks;
+    });
   }
 
   function explainStatus(provider, status, text, model, tried) {
@@ -396,6 +556,7 @@ var PROVIDERS = [
     has: has,
     probe: probe,
     send: send,
+    visionOCR: visionOCR,
     explainStatus: explainStatus
   };
 })();
