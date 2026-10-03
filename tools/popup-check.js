@@ -95,5 +95,11 @@ check("popup provider'ı listeliyor", /id="provider"/.test(html));
 check("kaydet düğmesi var", /id="saveKey"/.test(html));
 check("test düğmesi var", /id="testKey"/.test(html));
 
+// The "Test et" button: what it asks the background page and what it reads back.
+// The reply shape it depends on is pinned down in connection-check.js.
+check("sınama isteği gönderiliyor", /type:\s*"settings:test"/.test(js));
+check("sınama sonucu okunuyor", /reply\.result\.model/.test(js));
+check("sınama hatası gösteriliyor", /reply && reply\.error/.test(js));
+
 console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");
 process.exit(failed ? 1 : 0);
