@@ -70,6 +70,22 @@ body {
   text-overflow: ellipsis;
 }
 
+/* A finished pill often carries the only explanation the user will get — why a
+   page matched nothing, or which models a vendor rejected. Truncating that to
+   one ellipsised line defeats the point, so it wraps and stays readable. */
+.mangatr-pill.is-done {
+  max-width: 82vw;
+  border-radius: 14px;
+  align-items: flex-start;
+}
+
+.mangatr-pill.is-done .mangatr-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}
+
 .mangatr-spinner {
   width: 12px;
   height: 12px;

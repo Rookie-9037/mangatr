@@ -61,21 +61,77 @@
     if (done) {
       pillTimer = setTimeout(function () {
         node.hidden = true;
-      }, 2400);
+      }, 10000);
     }
+  }
+
+  // ----------------------------------------------------------- diagnostics
+
+  /* Every way this extension can quietly do nothing used to be invisible, which
+   * made "it didn't translate" impossible to act on: the page just looked
+   * untouched. These notes collect the reason and the pill states it outright. */
+  var diag = [];
+  var diagStats = { images: 0, eligible: 0, canvases: 0 };
+
+  function note(key) {
+    if (diag.indexOf(key) === -1) diag.push(key);
+    return message;
+  }
+
+  function diagReport() {
+    return diag.join(" · ");
+  }
+
+  /* A one-shot explanation for the common "nothing happened" cases. Kept
+   * separate from setPill so the wording can grow without touching the
+   * progress messages. */
+  function explainSilence() {
+    if (!settings.showPill) return;
+    var detail = [];
+    if (diagStats.canvases && !diagStats.eligible) {
+      detail.push(diagStats.canvases + " canvas var, uzantı sadece <img> okuyor");
+    }
+    if (diag.length) detail.push(diagReport());
+    if (!detail.length) {
+      detail.push(
+        diagStats.images + " görsel bulundu, uygun sayfa yok (eşik: " +
+          settings.minPixelWidth + "x" + settings.minPixelHeight + ")"
+      );
+    }
+    setPill("MangaTR: " + detail.join(" · "), true);
   }
 
   // -------------------------------------------------------------- selection
 
-  function isCandidate(img) {
-    if (!MangaTROCR.isRenderable(img)) return false;
-    if (img.naturalWidth < settings.minPixelWidth) return false;
-    if (img.naturalHeight < settings.minPixelHeight) return false;
+  /* `why` collects why an image was skipped so a page that matched nothing can
+   * say so out loud instead of leaving the user guessing. */
+  function isCandidate(img, why) {
+    if (!MangaTROCR.isRenderable(img)) {
+      if (why) note("görsel henüz yüklenmedi");
+      return false;
+    }
+    if (img.naturalWidth < settings.minPixelWidth || img.naturalHeight < settings.minPixelHeight) {
+      if (why) {
+        note("görsel çok küçük (" + img.naturalWidth + "x" + img.naturalHeight + ")");
+      }
+      return false;
+    }
     var source = img.currentSrc || img.src || "";
-    if (!/^(https?:|blob:|data:)/i.test(source)) return false;
-    // Banners are wide but short; a page is roughly a page.
-    if (img.naturalHeight / img.naturalWidth < 0.35) return false;
-    return img.getBoundingClientRect().width >= 280;
+    if (!/^(https?:|blob:|data:)/i.test(source)) {
+      if (why) note("görsel bir dosya değil");
+      return false;
+    }
+    // Banners are wide but short; a page is roughly a page. Tall webtoon strips
+    // stay well above this ratio on purpose.
+    if (img.naturalHeight / img.naturalWidth < 0.35) {
+      if (why) note("görsel bir banner şeridi");
+      return false;
+    }
+    if (img.getBoundingClientRect().width < 280) {
+      if (why) note("görsel ekranda çok dar");
+      return false;
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------- overlay
@@ -285,7 +341,12 @@
         }).then(function (result) {
           var blocks = MangaTROverlay.clusterBoxes(result.boxes || []);
           if (!blocks.length) {
+            /* Used to be a completely silent no-op: the overlay was removed and
+               the page looked untouched, so a failed OCR was indistinguishable
+               from the extension not running at all. */
+            note("OCR metin bulamadı (" + (result.boxes ? result.boxes.length : 0) + " kutu)");
             unwrap(entry, img);
+            explainSilence();
             return null;
           }
 
@@ -406,10 +467,17 @@
     if (!settings.enabled) return;
     var images = document.querySelectorAll("img");
     var observer = ensureObserver();
+    var eligible = 0;
     for (var i = 0; i < images.length; i++) {
       if (state.has(images[i])) continue;
-      if (isCandidate(images[i])) observer.observe(images[i]);
+      if (isCandidate(images[i], true)) {
+        eligible++;
+        observer.observe(images[i]);
+      }
     }
+    diagStats.images = images.length;
+    diagStats.eligible = eligible;
+    diagStats.canvases = document.querySelectorAll("canvas").length;
   }
 
   function scheduleScan() {
@@ -450,7 +518,12 @@
       var timer = setInterval(function () {
         attempts++;
         scan();
-        if (attempts > 15) clearInterval(timer);
+        if (attempts > 15) {
+          clearInterval(timer);
+          /* The watching window is over. If nothing was ever picked up, say why
+             instead of leaving the page looking like the extension is broken. */
+          if (!tracked.length && !diagStats.eligible) explainSilence();
+        }
       }, 1200);
     });
   }
