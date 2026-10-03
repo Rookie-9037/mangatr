@@ -242,28 +242,33 @@ var PROVIDERS = [
   }
 
   /* A one-line probe used by the popup's "Test et" button. Cheaper and far more
-   * useful than a real page: it tells the user whether the key itself works. */
+   * useful than a real page: it tells the user whether the key itself works.
+   * It shares send() with the translation path, so a model hop or a retry that
+   * rescues a real translation also rescues the test the user runs first. */
   function probe(id, model, key, base) {
     var provider = get(id);
-    var request = provider.request(
-      'Sadece şunu döndür, başka hiçbir şey yazma: {"lang":"en","items":[{"id":0,"tr":"Merhaba"}]}',
+    var landed = model;
+    return send(
+      provider,
       model,
       key,
-      { temperature: 0, base: base }
-    );
-    return fetch(request.url, request.init).then(function (response) {
-      if (!response.ok) {
-        return response.text().then(function (text) {
-          throw new Error(explainStatus(provider, response.status, text));
-        });
-      }
-      return response.json().then(function (payload) {
-        var parsed = provider.parse(payload);
-        if (!parsed || !parsed.items || !parsed.items.length) {
-          throw new Error("Model beklenen biçimde yanıt vermedi");
+      'Sadece şunu döndür, başka hiçbir şey yazma: {"lang":"en","items":[{"id":0,"tr":"Merhaba"}]}',
+      {
+        temperature: 0,
+        base: base,
+        /* Report the model that actually answered. After a hop the requested
+           one is not what worked, and telling the user "çalışıyor" without
+           naming it hides which model their key can actually reach. */
+        onSuccessModel: function (used) {
+          landed = used;
         }
-        return { ok: true, label: provider.label, model: model };
-      });
+      }
+    ).then(function (payload) {
+      var parsed = provider.parse(payload);
+      if (!parsed || !parsed.items || !parsed.items.length) {
+        throw new Error("Model beklenen biçimde yanıt vermedi");
+      }
+      return { ok: true, label: provider.label, model: landed };
     });
   }
 
@@ -271,7 +276,67 @@ var PROVIDERS = [
    * whether to fix the key, the model, or the network. `model` is the one that
    * actually failed — naming the first model on the list instead sent people
    * looking at a model they had never selected. */
-  function explainStatus(provider, status, text, model) {
+  /* Google answers 404 when a key cannot see a model and 503 when the model has
+   * no capacity. Both are properties of that one model rather than of the key,
+   * so the fix is to try a different model instead of failing the whole page.
+   * The walk is bounded: on a full outage an unbounded fan-out across six
+   * models would just multiply the wait. */
+  var MAX_MODEL_HOPS = 3;
+  var MAX_RETRIES = 2;
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  function nextUntried(models, tried) {
+    for (var i = 0; i < models.length; i++) {
+      if (tried.indexOf(models[i]) === -1) return models[i];
+    }
+    return null;
+  }
+
+  /* One place that talks to a vendor, shared by the popup's "Test et" and the
+   * real translation path. Keeping them separate is what let "Test et" give up
+   * on the first 503 while a page translation carried on retrying. */
+  function send(provider, model, key, prompt, options) {
+    var tried = [];
+    var hops = 0;
+    var attempt = 0;
+
+    function step() {
+      var request = provider.request(prompt, model, key, options);
+      return fetch(request.url, request.init).then(function (response) {
+        if (response.ok) {
+          if (options && typeof options.onSuccessModel === "function") {
+            options.onSuccessModel(model);
+          }
+          return response.json();
+        }
+        return response.text().then(function (bodyText) {
+          tried.push(model);
+          if ((response.status === 404 || response.status === 503) && hops < MAX_MODEL_HOPS) {
+            var candidate = nextUntried(provider.models || [], tried);
+            if (candidate) {
+              hops++;
+              model = candidate;
+              return step();
+            }
+          }
+          if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+            attempt++;
+            return sleep(600 * attempt * attempt).then(step);
+          }
+          throw new Error(explainStatus(provider, response.status, bodyText, model, tried));
+        });
+      });
+    }
+
+    return step();
+  }
+
+  function explainStatus(provider, status, text, model, tried) {
     var detail = String(text || "").slice(0, 200);
     if (status === 401 || status === 403) {
       return "Anahtar geçersiz (" + status + "). " + provider.hint;
@@ -300,7 +365,15 @@ var PROVIDERS = [
       return "Kota doldu veya hız sınırı (429). Biraz sonra tekrar dene.";
     }
     if (status >= 500) {
-      return "Servis hatası (" + status + "). " + detail;
+      var walked = (tried || []).filter(function (name, index, all) {
+        return all.indexOf(name) === index;
+      });
+      var detailPart = detail ? " " + detail : "";
+      var triedPart = walked.length > 1 ? " Denenen modeller: " + walked.join(", ") + "." : "";
+      return (
+        "Servis şu an yanıt vermiyor (" + status + ")." + detailPart + triedPart +
+        " Geçici bir yoğunluk olabilir; biraz sonra tekrar dene ya da başka bir model seç."
+      );
     }
     return "HTTP " + status + ": " + detail;
   }
@@ -322,6 +395,7 @@ var PROVIDERS = [
     get: get,
     has: has,
     probe: probe,
+    send: send,
     explainStatus: explainStatus
   };
 })();

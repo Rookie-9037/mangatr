@@ -87,6 +87,10 @@ function okJson(payload) {
   });
 }
 
+function failWith(status, body) {
+  return Promise.resolve({ ok: false, status: status, text: () => Promise.resolve(body) });
+}
+
 function seed(settings) {
   Object.keys(store).forEach((k) => { delete store[k]; });
   Object.assign(store, settings);
@@ -120,6 +124,40 @@ send({ type: "settings:test" }).then(function (reply) {
       String(calls[0].init.headers["x-goog-api-key"] || "") === "AIzaTEST" ||
       calls[0].init.url.indexOf("AIzaTEST") !== -1,
       JSON.stringify(calls[0].init.headers));
+
+    // ------------------------------------------------- 503: kapasite dolu
+
+    /* 503 is the one users hit most: the key is fine and the model is real, but
+       Gemini has no capacity. Hopping to another model is what rescues it, and
+       the reply must name the model that actually answered. */
+    seed({ provider: "gemini", model: "gemini-3.8-flash", apiKeys: { gemini: "AIzaTEST" } });
+    calls = [];
+    respondWith = (url) =>
+      String(url).indexOf("gemini-3.6-flash") !== -1
+        ? okJson(geminiPayload())
+        : failWith(503, "The model is overloaded. Please try again later.");
+    return send({ type: "settings:test" }).then(function (reply) {
+      check("503 başka modele geçip başarılı oldu", reply.ok === true && reply.result.ok === true,
+        JSON.stringify(reply));
+      check("503 gerçekten iki model denedi", calls.length === 2, calls.length + " istek");
+      check("503 cevaplayan model bildirildi", reply.ok && reply.result.model === "gemini-3.6-flash",
+        reply.ok ? reply.result.model : reply.error);
+    }).then(function () {
+
+    // ------------------------------------------------ 503: kapasite hiç yok
+
+      seed({ provider: "gemini", model: "gemini-3.8-flash", apiKeys: { gemini: "AIzaTEST" } });
+      calls = [];
+      respondWith = () => failWith(503, "The model is overloaded.");
+      return send({ type: "settings:test" });
+    }).then(function (reply) {
+      check("503 kalıcıysa anlaşılır hata verdi", reply.ok === false && /yanıt vermiyor/i.test(reply.error),
+        reply.error);
+      check("503 denenen modelleri saydı", /Denenen modeller/.test(reply.error), reply.error);
+      /* Bounded on purpose: 3 model hops then 2 retries of the last one. An
+         unbounded fan-out during an outage would just multiply the wait. */
+      const MAX503 = 3 + 2 + 1;
+      check("503 istek sayısı sınırlı", calls.length === MAX503, calls.length + "/" + MAX503);
 
     // ---------------------------------------------------------------- deepseek
 
@@ -205,6 +243,7 @@ send({ type: "settings:test" }).then(function (reply) {
         });
       });
     });
+  });
   });
 }).then(function () {
   console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");

@@ -145,59 +145,17 @@ var MangaTRTranslate = (function () {
 
   // ------------------------------------------------------------------- calls
 
-  function callOnce(target, provider, prompt, attempt) {
-    attempt = attempt || 0;
-
-    var request = provider.request(prompt, target.model, target.key, {
+  /* Provider calls go through providers.send so the popup's "Test et" and a real
+   * page behave identically: same model hops on 404/503, same retries on
+   * 429/5xx. Duplicating that policy here is what let the test fail on a
+   * transient 503 while the page itself would have recovered. */
+  function callOnce(target, provider, prompt) {
+    return MangaTRProviders.send(provider, target.model, target.key, prompt, {
       temperature: 0.25,
       // Without this the OpenAI-compatible adapter has no address to call for a
       // self-hosted endpoint, and the request never leaves the page.
       base: target.base
     });
-
-    return fetch(request.url, request.init).then(function (response) {
-      if (response.ok) return response.json();
-
-      return response.text().then(function (bodyText) {
-        // A 404 means the key cannot see that model, not that the key is bad:
-        // Google answers this way for every project that has not used a model
-        // before, and vendors retire models on their own schedule. So walk the
-        // provider's list instead of trusting one hardcoded fallback that is
-        // itself eventually retired.
-        if (response.status === 404) {
-          var step = nextModel(provider, target);
-          if (step) {
-            var retry = Object.assign({}, target, { model: step.model, tried: step.tried });
-            return callOnce(retry, provider, prompt, 0);
-          }
-        }
-        if ((response.status === 429 || response.status >= 500) && attempt < 2) {
-          return sleep(700 * (attempt + 1)).then(function () {
-            return callOnce(target, provider, prompt, attempt + 1);
-          });
-        }
-        throw new Error(
-          MangaTRProviders.explainStatus(target.provider, response.status, bodyText, target.model)
-        );
-      });
-    });
-  }
-
-  /* The next model on the provider's list that this call has not already tried,
-   * together with the updated tried-list. Returning the grown list is what stops
-   * the walk: a fixed fallback cannot do this, and a list that is not carried
-   * forward just re-requests the first candidate forever.
-   * Returns null once the list is exhausted, which turns a 404 into an error. */
-  function nextModel(provider, target) {
-    var models = provider.models || [];
-    var tried = target.tried || [];
-    if (tried.indexOf(target.model) === -1) tried = tried.concat([target.model]);
-    for (var i = 0; i < models.length; i++) {
-      if (tried.indexOf(models[i]) === -1) {
-        return { model: models[i], tried: tried };
-      }
-    }
-    return null;
   }
 
   function normalise(parsed, items) {
@@ -221,7 +179,7 @@ var MangaTRTranslate = (function () {
 
   function translateBatch(items, target, provider, sourceCode, sourceLabel) {
     var prompt = buildPrompt(items, sourceCode, sourceLabel);
-    return callOnce(target, provider, prompt, 0).then(function (payload) {
+    return callOnce(target, provider, prompt).then(function (payload) {
       return normalise(provider.parse(payload), items);
     });
   }

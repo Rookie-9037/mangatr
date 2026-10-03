@@ -298,13 +298,15 @@ Translate.translate([{ id: 0, text: SPANISH }], gemini, { code: "es", label: "İ
           return errorResponse(404, "model not found");
         };
         return Translate.translate([{ id: 0, text: MISSING_MODEL_TEXT }], gemini, null).then(function (reply) {
-          /* A 404 must walk the provider's list instead of one hardcoded
-           * fallback, then stop — the old single-fallback model is now
-           * retired upstream, so a fixed name would fail forever. */
+          /* A 404 must move to another model, stay bounded, and stop — a fixed
+           * fallback model is retired upstream eventually, and an unbounded walk
+           * would multiply the wait during a full outage. */
           const list = Providers.get("gemini").models;
-          check("404 listedeki diğer modelleri denedi", urls.length > 1, "istek=" + urls.length);
-          check("404 model listesi tükendiğinde durdu", urls.length === list.length, urls.length + "/" + list.length);
-          check("404 ikinci istek sıradaki model", urls[1].indexOf(list[0]) !== -1, urls[1]);
+          const HOP_LIMIT = 3;
+          check("404 başka modele geçti", urls.length > 1, "istek=" + urls.length);
+          check("404 yürüyüşü sınırlı", urls.length === HOP_LIMIT + 1, urls.length + "/" + (HOP_LIMIT + 1));
+          check("404 arka arkaya aynı modeli istemedi", new Set(urls).size === urls.length, urls.join(" | "));
+          check("404 listedeki modellerden seçti", urls.slice(1).every((u) => list.some((m) => u.indexOf(m) !== -1)));
           check("404 sonunda hata verdi", reply.errors.length === 1 && reply.results.length === 0);
           check("404 mesajı denenen modeli söylüyor", /bulunamadı/i.test(reply.errors[0].error), reply.errors[0].error);
         });
