@@ -130,5 +130,21 @@ check("düğme kuyruk sonucunu gösteriyor", /kuyruğa alındı/.test(js));
 check("düğme hatayı yüzeye çıkarıyor", /els\.runNow[\s\S]{0,400}is-warn/.test(js));
 check("düğme kendini kilitlemiyor", /els\.runNow\.disabled = false/.test(js));
 
+// ------------------------------------------------------------ hata görünürlüğü
+
+/* "3 sayfa kuyruğa alındı" followed by nothing was the worst failure mode in
+   this extension: the error pill auto-hid after ten seconds and pump()'s empty
+   catch swallowed the reason, so a broken run looked exactly like a page with
+   no text. The reason has to survive the popup being closed and reopened. */
+const content = fs.readFileSync(
+  path.join(__dirname, "..", "Extension", "Resources", "content.js"), "utf8");
+check("hata ekranda kalıcı yazıyor", /function reportFailure/.test(content) && /reportFailure\(error\)/.test(content));
+check("hata konsola da yazılıyor", /console\.error\("\[MangaTR\]"/.test(content));
+check("hata kaydediliyor", /mangatrLastError/.test(content));
+check("başarı hatayı temizliyor", /reportSuccess/.test(content) && /mangatrLastError"\)/.test(content));
+check("sessiz catch kalmadı", !/process\(next\)\s*\n?\s*\.catch\(function \(\) \{\}\)/.test(content));
+check("son hata alanı var", /id="lastError"/.test(html));
+check("popup son hatayı gösteriyor", /showLastFailure/.test(js) && /Son deneme başarısız/.test(js));
+
 console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");
 process.exit(failed ? 1 : 0);

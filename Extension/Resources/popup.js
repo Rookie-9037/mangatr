@@ -13,6 +13,7 @@
     saveKey: document.getElementById("saveKey"),
     testKey: document.getElementById("testKey"),
     runNow: document.getElementById("runNow"),
+    lastError: document.getElementById("lastError"),
     model: document.getElementById("model"),
     modelField: document.getElementById("modelField"),
     customBase: document.getElementById("customBase"),
@@ -237,6 +238,7 @@
       return refreshOcrStatus(settings).catch(function () {
         setStatus(settings.enabled ? "Etkin" : "Kapalı", settings.enabled ? "is-ok" : "is-warn");
       });
+      return showLastFailure();
     })
     .catch(function (error) {
       setStatus("Ayar okunamadı: " + (error && error.message ? error.message : error), "is-warn");
@@ -261,6 +263,22 @@
         (provider ? provider.label : "seçili servis") + " görsel okuyamaz — Google Gemini seç",
       cls: "is-warn"
     };
+  }
+
+  /* A run that failed on the page says so there, but the popup is where the user
+   * already is when they wonder why nothing happened. Showing the stored failure
+   * is the difference between "it silently did nothing" and a reason. */
+  function showLastFailure() {
+    return MangaTR.api().storage.local.get({ mangatrLastError: null }).then(function (stored) {
+      var failure = stored && stored.mangatrLastError;
+      if (!failure || !failure.at) return;
+      /* Only worth showing while it is still the live explanation. */
+      if (Date.now() - failure.at > 15 * 60 * 1000) return;
+      var hint = els.lastError;
+      if (!hint) return;
+      hint.hidden = false;
+      hint.textContent = "Son deneme başarısız: " + failure.message;
+    }).catch(function () {});
   }
 
   function refreshOcrStatus(settings) {

@@ -423,21 +423,52 @@
             }
             entry.sourceLabel = resolvedLabel;
             applyTranslations(entry, blocks, payload, img, resolvedLabel);
+            reportSuccess();
           });
         });
       })
       .catch(function (error) {
         unwrap(entry, img);
-        setPill("MangaTR: " + String((error && error.message) || error), true);
+        reportFailure(error);
       });
+  }
+
+  /* A failure that scrolls away is indistinguishable from a page that simply
+   * has nothing to translate. These three things are what make a broken run
+   * diagnosable at all: a pill that stays, a console line Safari's inspector can
+   * show, and a note the popup can still display after it is reopened. */
+  function reportFailure(error) {
+    var message = String((error && error.message) || error);
+    setPill("MangaTR: " + message);
+    if (window.console && console.error) console.error("[MangaTR]", message);
+    try {
+      MangaTR.api().storage.local.set({ mangatrLastError: { message: message, at: Date.now() } });
+    } catch (error) {
+      /* Nothing to do: the pill above is the primary channel. */
+    }
+  }
+
+  function reportSuccess() {
+    try {
+      MangaTR.api().storage.local.remove("mangatrLastError");
+    } catch (error) {
+      /* Same: a stale note is better than no note. */
+    }
   }
 
   function pump() {
     if (running || !queue.length) return;
     running = true;
     var next = queue.shift();
-    process(next)
-      .catch(function () {})
+    Promise.resolve()
+      .then(function () {
+        return process(next);
+      })
+      .catch(function (error) {
+        /* Swallowed here is how "queued 3 pages" turned into "nothing happened,
+         * ever": the work died quietly and the page looked untouched. */
+        reportFailure(error);
+      })
       .then(function () {
         running = false;
         pump();
