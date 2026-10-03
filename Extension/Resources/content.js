@@ -328,7 +328,17 @@
         if (!available) {
           if (!nativeWarned) {
             nativeWarned = true;
-            setPill("MangaTR: OCR bağlantısı yok, uygulamayı bir kez aç", true);
+            /* Named after the containing app because that is the usual fix:
+               iOS will not bring up the extension host for a sideloaded app
+               until the app itself has been launched once. The reason from the
+               failed message rides along so a real bridge failure is
+               distinguishable from that. */
+            setPill(
+              "MangaTR: OCR bağlantısı yok (" +
+                (MangaTR.nativeErrorText() || "bilinmeyen") +
+                ") — MangaTR uygulamasını bir kez aç",
+              true
+            );
           }
           unwrap(entry, img);
           return null;

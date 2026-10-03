@@ -75,18 +75,35 @@ var MangaTR = (function () {
 
   /* nativeSupport is cached because a failed probe means the extension bundle
    * is not wired up, and retrying it per image would be pure latency. */
+  /* The last nativeMessaging failure, kept so the UI can say *why* OCR is
+   * unavailable. Swallowing this into a bare false is what left "OCR bağlantısı
+   * yok" as the only clue, with no way to tell a not-yet-opened app apart from a
+   * genuine bridge failure. */
+  var nativeError = "";
+
   function nativeAvailable() {
     if (nativeSupport !== null) return Promise.resolve(nativeSupport);
     return api()
       .runtime.sendNativeMessage(APP_ID, { type: "ping" })
       .then(function (reply) {
-        nativeSupport = !!(reply && reply.ok);
-        return nativeSupport;
-      })
-      .catch(function () {
+        if (reply && reply.ok) {
+          nativeSupport = true;
+          nativeError = "";
+          return true;
+        }
         nativeSupport = false;
+        nativeError = reply && reply.error ? String(reply.error) : "native yanıt yok";
+        return false;
+      })
+      .catch(function (error) {
+        nativeSupport = false;
+        nativeError = String((error && error.message) || error || "bilinmeyen hata");
         return false;
       });
+  }
+
+  function nativeErrorText() {
+    return nativeError;
   }
 
   function native(message) {
@@ -103,6 +120,7 @@ var MangaTR = (function () {
     saveSettings: saveSettings,
     send: send,
     native: native,
-    nativeAvailable: nativeAvailable
+    nativeAvailable: nativeAvailable,
+    nativeErrorText: nativeErrorText
   };
 })();

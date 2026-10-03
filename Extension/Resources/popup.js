@@ -233,9 +233,12 @@
       setStatus(settings.enabled ? "Etkin" : "Kapalı", settings.enabled ? "is-ok" : "is-warn");
       refreshCacheSize();
 
-      return MangaTR.nativeAvailable().then(function (available) {
+return MangaTR.nativeAvailable().then(function (available) {
         if (!available) {
-          setStatus("OCR bağlantısı yok — uygulamayı aç", "is-warn");
+          setStatus(
+            "OCR bağlantısı yok (" + (MangaTR.nativeErrorText() || "bilinmeyen") + ") — uygulamayı bir kez aç",
+            "is-warn"
+          );
         }
       });
     })
