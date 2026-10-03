@@ -5,7 +5,9 @@ struct ContentView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        NavigationStack {
+        // NavigationStack needs iOS 16; the extension itself works from
+        // iOS 15, so the host app should not raise the floor.
+        NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header
@@ -43,6 +45,7 @@ struct ContentView: View {
             }
             .navigationTitle("MangaTR")
             .background(Color(uiColor: .systemGroupedBackground))
+            .navigationViewStyle(.stack)
         }
     }
 
