@@ -2,6 +2,14 @@
   box-sizing: border-box;
 }
 
+/* `el.hidden = true` sets the attribute, and the browser's default
+ * `[hidden] { display: none }` lives in the UA stylesheet — which any author rule
+ * like `.field { display: block }` outranks. Without this the custom-server
+ * fields stayed on screen while DeepSeek was selected. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   width: 300px;
   margin: 0;
