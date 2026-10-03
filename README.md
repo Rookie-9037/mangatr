@@ -1,5 +1,7 @@
 # MangaTR
 
+[![Build](https://github.com/Rookie-9037/mangatr/actions/workflows/build-ipa.yml/badge.svg)](https://github.com/Rookie-9037/mangatr/actions/workflows/build-ipa.yml)
+
 iPhone ve iPad için manga çeviri uygulaması. Bir manga sayfasına girdiğinde
 görselin üzerindeki Japonca metni cihazda tanır, Gemini ile Türkçeye çevirir ve
 balonun içine yazar — sayfa akışı bozulmadan, sanki manga baştan Türkçe
@@ -43,32 +45,23 @@ Bu repo Xcode projesi kaynaklarıdır; `.xcodeproj` yok, [XcodeGen](https://gith
 spesifikasyonu (`project.yml`) var. Derleme GitHub Actions'ta macOS runner ile
 yapılır.
 
-1. **GitHub'a yükle.** Depoyu *public* yap (macOS dakikaları sınırsız, private'de
-   aylık 200 dakika kotalı var).
+1. **Derlemeyi başlat.** Depoya her `push` otomatik olarak tetikler. Elle
+   başlatmak için: **Actions → Build → Run workflow**. `check` ve `ipa` adımlarının
+   yeşil olması gerekir. Derleme ~5-8 dakika sürer.
 
-   ```powershell
-   cd $HOME\Desktop\mangatr
-   git init
-   git add .
-   git commit -m "MangaTR: ilk surum"
-   git branch -M main
-   git remote add origin https://github.com/<kullaniciadı>/mangatr.git
-   git push -u origin main
-   ```
+   > Depoyu *public* tut. macOS dakikaları sınırsız; private'de aylık 200 dakika
+   > kota var.
 
-2. **Derlemeyi başlat.** GitHub'da **Actions → Build → Run workflow**, ya da
-   push'tan sonra otomatik başlar. `check` ve `ipa` adımlarının yeşil olması
-   gerek. Derleme ~6-10 dakika sürer.
-
-3. **İndir.** İş bitince sayfanın altındaki **Artifacts** bölümünden
+2. **İndir.** İş bitince işin altındaki **Artifacts** bölümünden
    `MangaTR-unsigned-ipa` dosyasını indir ve içinden `MangaTR-unsigned.ipa`'yı çıkar.
 
-4. **Cihaza yükle.** Windows'ta [Sideloadly](https://sideloadly.io/) kur
-   (macOS da var). `Sideloadly.exe` çalıştır, `.ipa`'yı sürükle, Apple ID'ni
-   gir, **Start**'a bas. Cihazda "Güvenilmeyen Geliştirici" uyarısı çıkarsa
-   *Ayarlar → Genel → VPN ve Cihaz Yönetimi* içinden profili güvenilir işaretle.
+3. **Cihaza yükle.** Windows'ta [Sideloadly](https://sideloadly.io/) kur
+   ([64-bit kurulum](https://sideloadly.io/SideloadlySetup64.exe)). `Sideloadly.exe`
+   çalıştır, `.ipa`'yı sürükle, Apple ID'ni gir, **Start**'a bas. Cihazda "Güvenilmeyen
+   Geliştirici" uyarısı çıkarsa *Ayarlar → Genel → VPN ve Cihaz Yönetimi* içinden
+   profili güvenilir işaretle.
 
-   Alternatif: [AltStore](https://altstore.io) ya da
+Alternatif: [AltStore](https://altstore.io) ya da
    [SideStore](https://sidestore.io) — ikisi de haftalık otomatik yenileme yapar,
    süreci bir kere unutursun.
 
@@ -81,10 +74,10 @@ yapılır.
 ### Apple ID hesabı
 
 - **Ücretsiz Apple ID:** imza 7 gün geçerli, haftada bir yeniden yüklemek gerekir.
-  Günde bir manga okumak için can sıkıcı.
-- **99$/yıl Apple Geliştirici hesabı:** 1 yıl geçerli, 3 uygulamaya kadar. Bu
-  araç için önerilen bu.
-- **Okul/şirket hesabı:** aynı şekilde çalışır.
+  Sideloadly'nin arka planda imzayı tazelemesi mümkün ama Wi-Fi bağlantısı ve açık
+  bir PC gerektirir. SideStore bunu cihazın kendisi yapar, bu yüzden uzun vadede
+  SideStore önerilir (başarısız yenilemede uygulamada **Retry**'ye basman gerekir).
+- **99$/yıl Apple Geliştirici hesabı:** 1 yıl geçerli, 3 uygulamaya kadar.
 
 ## Yerel geliştirme (Mac varsa)
 
