@@ -73,7 +73,15 @@ jobs:
           APP="build/Build/Products/Release-iphoneos/MangaTR.app"
           EXT="$APP/PlugIns/MangaTRExtension.appex"
           test -d "$APP" || { echo "uygulama üretilmedi"; exit 1; }
-          test -d "$EXT" || { echo "Safari eklentisi gömülmedi"; exit 1; }
+          if [ ! -d "$EXT" ]; then
+            echo "Safari eklentisi gömülmedi. .app içeriği:"
+            ls "$APP"
+            echo "--- PlugIns ---"
+            ls "$APP/PlugIns" 2>&1 || echo "(PlugIns yok)"
+            echo "--- derlenen tüm ürünler ---"
+            find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.appex' -o -maxdepth 1 -name '*.app'
+            exit 1
+          fi
 
           # Safari web extensions want manifest.json at the .appex bundle root,
           # so fail loudly here rather than at runtime on the device.
