@@ -25,6 +25,10 @@ function check(name, ok, detail) {
 const store = {};
 let calls = [];
 let respondWith = null;
+/* What the open tab's content script answers with; the manual trigger's whole
+ * contract is the hop from the popup through background into that page. */
+let tabMessages = [];
+let tabReply = () => ({ ok: true, images: 4, painted: 2, queued: 2 });
 
 function geminiPayload() {
   return {
@@ -60,6 +64,13 @@ ctx.browser = {
       get: (defaults) => Promise.resolve(Object.assign({}, defaults, store)),
       set: (patch) => { Object.assign(store, patch); return Promise.resolve(); },
       remove: (keys) => { (keys || []).forEach((k) => { delete store[k]; }); return Promise.resolve(); }
+    }
+  },
+  tabs: {
+    query: () => Promise.resolve([{ id: 7 }]),
+    sendMessage: (id, message) => {
+      tabMessages.push({ id: id, message: message });
+      return Promise.resolve(tabReply());
     }
   }
 };
@@ -244,6 +255,32 @@ send({ type: "settings:test" }).then(function (reply) {
       });
     });
   });
+  });
+}).then(function () {
+  // --------------------------------------------- elle "Bu sayfayı çevir"
+
+  return send({ type: "ocr:run" }).then(function (reply) {
+    check("sayfa tetiği aktif sekmeye gitti", tabMessages.length === 1 && tabMessages[0].id === 7,
+      JSON.stringify(tabMessages));
+    check("sayfaya doğru mesaj gönderildi", tabMessages[0].message.type === "ocr:run");
+    check("kuyruk bilisi döndü", reply.ok === true && reply.result.queued === 2, JSON.stringify(reply));
+
+    /* A PDF viewer or a chrome:// page has no content script, and the page's own
+     * scripts may answer instead. Both look like an empty reply, and an empty
+     * reply used to read as success. */
+    tabMessages = [];
+    tabReply = () => undefined;
+    return send({ type: "ocr:run" });
+  }).then(function (reply) {
+    check("yanıt yoksa anlaşılır hata veriyor",
+      reply.ok === false && /çalışmıyor/i.test(reply.error), reply.error);
+
+    tabMessages = [];
+    tabReply = () => ({ ok: false, error: "Sayfada çevrilecek büyük görsel bulunamadı" });
+    return send({ type: "ocr:run" });
+  }).then(function (reply) {
+    check("sayfa bulamadıysa hata yüzeye çıktı",
+      reply.ok === false && /görsel bulunamadı/i.test(reply.error), reply.error);
   });
 }).then(function () {
   console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");

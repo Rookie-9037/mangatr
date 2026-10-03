@@ -122,6 +122,25 @@
       });
     },
 
+    /* The popup's manual trigger. Automatic detection depends on the page image
+     * becoming visible to an observer, which some readers never allow; this asks
+     * the active tab to translate what it is showing right now, no heuristics. */
+    "ocr:run": function () {
+      return MangaTR.api().tabs.query({ active: true, currentWindow: true }).then(function (tabs) {
+        if (!tabs || !tabs.length || tabs[0].id === undefined) {
+          throw new Error("Açık sekme bulunamadı");
+        }
+        return MangaTR.api().tabs.sendMessage(tabs[0].id, { type: "ocr:run" }).then(function (reply) {
+          /* A reader that answers with its own unrelated handler, or no content
+           * script at all (a PDF viewer, a chrome:// page), shows up as an empty
+           * reply rather than an exception. */
+          if (!reply) throw new Error("Bu sayfada MangaTR çalışmıyor");
+          if (reply.ok === false && reply.error) throw new Error(reply.error);
+          return reply;
+        });
+      });
+    },
+
     "image:fetch": function (message) {
       return fetchImageBytes(message.url, message.referer).catch(function (error) {
         return { ok: false, error: String(error.message || error) };

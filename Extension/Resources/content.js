@@ -450,6 +450,53 @@
     pump();
   }
 
+  /* Site-independent escape hatch, wired to the popup's "Bu sayfayı çevir".
+   *
+   * Automatic detection depends on the page image intersecting the viewport.
+   * Plenty of manga readers never let that happen in a form we can observe --
+   * paged carousels park non-current pages off-screen, zoomable viewers keep the
+   * page in a transformed layer, some render into a canvas -- and the result is
+   * a site that silently does nothing, forever. This skips the intersection
+   * observer and the size heuristics and simply takes the largest pictures that
+   * are actually painted on screen. */
+  function forceRun() {
+    var images = document.querySelectorAll("img");
+    var painted = [];
+    for (var i = 0; i < images.length; i++) {
+      var img = images[i];
+      if (!MangaTROCR.isRenderable(img)) continue;
+      var source = img.currentSrc || img.src || "";
+      if (!/^(https?:|blob:|data:)/i.test(source)) continue;
+      // Rendered size, not natural size: the point is what the reader is showing.
+      var rect = img.getBoundingClientRect();
+      if (rect.width < 200 || rect.height < 200) continue;
+      painted.push({ img: img, area: img.naturalWidth * img.naturalHeight });
+    }
+    painted.sort(function (a, b) {
+      return b.area - a.area;
+    });
+
+    /* Clearing the recorded state is deliberate. The button has to be able to
+     * retry a page that already failed -- an earlier attempt may have died on a
+     * native ping or a network blip, and a WeakMap entry would otherwise make
+     * that page permanently untranslatable. */
+    var targets = painted.slice(0, 3);
+    targets.forEach(function (item) {
+      state.delete(item.img);
+      var index = queue.indexOf(item.img);
+      if (index !== -1) queue.splice(index, 1);
+    });
+    targets.forEach(function (item) {
+      enqueue(item.img);
+    });
+
+    return {
+      images: images.length,
+      painted: painted.length,
+      queued: targets.length
+    };
+  }
+
   // ------------------------------------------------------------- observers
 
   var intersectionObserver = null;
@@ -497,11 +544,33 @@
     refreshSettings().then(function () {
       scan();
 
-      MangaTR.api().runtime.onMessage.addListener(function (message) {
+      MangaTR.api().runtime.onMessage.addListener(function (message, sender, sendResponse) {
         if (message && message.type === "settings:changed") {
           settings = message.settings;
           repaintAll();
           if (settings.enabled) scheduleScan();
+          return false;
+        }
+        if (message && message.type === "ocr:run") {
+          /* Answers synchronously with what it queued, so the popup can tell
+           * "queued nothing" apart from "working on it". The translation itself
+           * is async and reports through the on-page pill. */
+          if (!settings.enabled) {
+            sendResponse({ ok: false, error: "MangaTR kapalı" });
+            return false;
+          }
+          var result = forceRun();
+          sendResponse(
+            result.queued
+              ? result
+              : {
+                  ok: false,
+                  error: "Sayfada çevrilecek büyük görsel bulunamadı" +
+                    (result.painted ? "" : " (" + result.images + " görsel tarandı)"),
+                  detail: result
+                }
+          );
+          return false;
         }
         return false;
       });

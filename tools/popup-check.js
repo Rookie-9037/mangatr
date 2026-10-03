@@ -118,5 +118,17 @@ check("aç/kapa düğmesi OCR durumunu ezmiyor", /refreshOcrStatus\(\{ provider:
  * popup, so it must not silently fall back to whatever is first in the array. */
 check("sağlayıcı kimliğine göre seçiliyor", /byId\[\(settings && settings\.provider\)/.test(js));
 
+// ------------------------------------------------------- elle sayfa tetiği
+
+/* Some readers never let the page image become visible to the observer, and the
+ * only way to find out which kind of site you are on is to try the manual
+ * trigger -- so it has to exist, be wired, and report failures. */
+check("bu sayfayı çevir düğmesi var", /id="runNow"/.test(html));
+check("düğme JS'e bağlı", /runNow: document\.getElementById\("runNow"\)/.test(js));
+check("düğme ocr:run gönderiyor", /type: "ocr:run"/.test(js));
+check("düğme kuyruk sonucunu gösteriyor", /kuyruğa alındı/.test(js));
+check("düğme hatayı yüzeye çıkarıyor", /els\.runNow[\s\S]{0,400}is-warn/.test(js));
+check("düğme kendini kilitlemiyor", /els\.runNow\.disabled = false/.test(js));
+
 console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");
 process.exit(failed ? 1 : 0);

@@ -12,6 +12,7 @@
     keyState: document.getElementById("keyState"),
     saveKey: document.getElementById("saveKey"),
     testKey: document.getElementById("testKey"),
+    runNow: document.getElementById("runNow"),
     model: document.getElementById("model"),
     modelField: document.getElementById("modelField"),
     customBase: document.getElementById("customBase"),
@@ -332,6 +333,29 @@ els.enabled.addEventListener("change", function () {
       els.testKey.disabled = false;
       els.testKey.textContent = "Test et";
     });
+  });
+
+  /* Manual trigger for readers where the automatic pass never fires. Reports what
+   * the page accepted, not what eventually happened: the translation itself is
+   * async and its progress shows up in the on-page pill. */
+  els.runNow.addEventListener("click", function () {
+    els.runNow.disabled = true;
+    setStatus("Sayfa okunuyor…", "");
+    MangaTR.send({ type: "ocr:run" })
+      .then(function (reply) {
+        if (reply && reply.ok && reply.result) {
+          var r = reply.result;
+          setStatus(r.queued + " sayfa kuyruğa alındı", "is-ok");
+        } else {
+          setStatus((reply && reply.error) || "Sayfa bulunamadı", "is-warn");
+        }
+      })
+      .catch(function (error) {
+        setStatus(String((error && error.message) || error), "is-warn");
+      })
+      .then(function () {
+        els.runNow.disabled = false;
+      });
   });
 
   els.provider.addEventListener("change", function () {
