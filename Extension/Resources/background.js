@@ -70,7 +70,33 @@
 
     translate: function (message) {
       return MangaTR.getSettings().then(function (settings) {
-        return MangaTRTranslate.translate(message.items || [], settings);
+        // content.js sends its own detection result; fall back to the popup
+        // setting only when the page never got far enough to sniff the text.
+        var source = message.source || null;
+        if (!source && MangaTRLang) {
+          var label = MangaTRLang.describe(null, settings);
+          if (label) source = { code: settings.sourceLanguages, label: label };
+        }
+        return MangaTRTranslate.translate(message.items || [], settings, source);
+      });
+    },
+
+    "providers:list": function () {
+      return MangaTRProviders.list();
+    },
+
+    /* The popup's "Test et" button. Runs against the stored key so the answer
+     * reflects what a real page would get, not what is in the text field. */
+    "settings:test": function () {
+      return MangaTR.getSettings().then(function (settings) {
+        var resolved = MangaTRTranslate.resolveSettings(settings);
+        if (!resolved.key) throw new Error("Önce API anahtarı kaydet");
+        return MangaTRProviders.probe(
+          resolved.id,
+          resolved.model,
+          resolved.key,
+          resolved.base
+        );
       });
     },
 

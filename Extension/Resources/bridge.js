@@ -13,9 +13,19 @@ var MangaTR = (function () {
     enabled: true,
     hideOriginal: true,
     fontScale: 1.0,
+    fontFamily: "auto",
+    // "auto" is the default and the recommended mode: the page's own script
+    // detection plus the model decide what language a page is in.
     sourceLanguages: "auto",
+    provider: "gemini",
     model: "gemini-2.5-flash",
+    // Keys live per provider so switching services never reuses one vendor's
+    // secret for another.
+    apiKeys: {},
+    // Kept for keys saved by older builds; migrated into apiKeys on first save.
     apiKey: "",
+    customBase: "",
+    customModel: "",
     minPixelWidth: 620,
     minPixelHeight: 400,
     autoTranslate: true,

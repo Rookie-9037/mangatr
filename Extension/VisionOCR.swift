@@ -33,15 +33,39 @@ enum VisionOCR {
     /// wide; anything past this costs time without improving OCR accuracy.
     static let maxEdge: CGFloat = 2400
 
-    static func run(data: Data) throws -> Result {
+    /// Everything Vision ships a recognition model for. Indonesian is
+    /// deliberately missing: there is no id-ID model, so those webtoons fall
+    /// back to en-US, which is close enough to repair the spelling.
+    static let automaticLanguages = [
+        "ja-JP", "ko-KR", "zh-Hans", "zh-Hant",
+        "en-US", "es-ES", "pt-BR", "fr-FR", "de-DE", "it-IT", "tr-TR"
+    ]
+
+    /// `hint` is the popup's source-language choice: "auto" means let Vision
+    /// consider everything, anything else pins the page to one language.
+    static func visionLanguages(for hint: String?) -> [String] {
+        guard let hint, !hint.isEmpty, hint != "auto" else { return automaticLanguages }
+        let pinned: [String: [String]] = [
+            "ja": ["ja-JP"], "ko": ["ko-KR"], "zh": ["zh-Hans", "zh-Hant"],
+            "en": ["en-US"], "es": ["es-ES"], "pt": ["pt-BR"], "fr": ["fr-FR"],
+            "de": ["de-DE"], "it": ["it-IT"], "tr": ["tr-TR"], "ru": ["ru-RU"]
+        ]
+        return pinned[hint] ?? automaticLanguages
+    }
+
+    static func run(data: Data, languages: [String]) throws -> Result {
         let (cgImage, pixelWidth, pixelHeight) = try prepare(data: data)
 
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        // Language correction actively hurts kana-heavy manga dialogue
-        // ("ねえ" -> "Hey" style false positives), so it stays off.
-        request.usesLanguageCorrection = false
-        request.recognitionLanguages = ["ja-JP", "en-US"]
+        // Language correction is a language model over the recognised words: it
+        // genuinely repairs OCR noise in Latin script, but it happily rewrites
+        // kana and hangul into plausible-looking nonsense. Latin sources only.
+        let cjkOnly = languages.allSatisfy {
+            $0.hasPrefix("ja") || $0.hasPrefix("ko") || $0.hasPrefix("zh")
+        }
+        request.usesLanguageCorrection = !cjkOnly
+        request.recognitionLanguages = languages
         // Manga speech is tiny relative to the page. Vision's default 1/32
         // minimum text height throws most of it away.
         request.minimumTextHeight = 0.004

@@ -8,6 +8,7 @@
 
   var els = {
     file: document.getElementById("file"),
+    provider: document.getElementById("provider"),
     key: document.getElementById("key"),
     model: document.getElementById("model"),
     scale: document.getElementById("scale"),
@@ -27,6 +28,50 @@
   function log(message) {
     var stamp = new Date().toLocaleTimeString("tr-TR");
     els.log.textContent = stamp + "  " + message + "\n" + els.log.textContent;
+  }
+
+  // ------------------------------------------------------------ sağlayıcı
+
+  /* Model listesi ve anahtar ipucu sağlayıcıya göre değişir; aynı liste
+   * popup.js'de de kullanılıyor. */
+  function fillProviders() {
+    MangaTRProviders.list().forEach(function (provider) {
+      var option = document.createElement("option");
+      option.value = provider.id;
+      option.textContent = provider.label;
+      els.provider.appendChild(option);
+    });
+  }
+
+  function currentProvider() {
+    return MangaTRProviders.get(els.provider.value);
+  }
+
+  function fillModels() {
+    var provider = currentProvider();
+    var models = provider.models || [];
+    els.model.innerHTML = "";
+    if (!models.length) {
+      var none = document.createElement("option");
+      none.value = provider.defaultModel || "";
+      none.textContent = provider.defaultModel || "sunucu varsayılanı";
+      els.model.appendChild(none);
+      return;
+    }
+    models.forEach(function (model) {
+      var option = document.createElement("option");
+      option.value = model;
+      option.textContent = model;
+      els.model.appendChild(option);
+    });
+    els.model.value = provider.defaultModel;
+  }
+
+  function applyProvider() {
+    var provider = currentProvider();
+    fillModels();
+    els.key.placeholder = provider.keyPlaceholder || "anahtar";
+    log("servis: " + provider.label + " — " + (provider.hint || ""));
   }
 
   // --------------------------------------------------------------- OCR
@@ -134,13 +179,17 @@
           return { id: b.id, text: b.text };
         });
 
+        var provider = currentProvider();
         var apiKey = els.key.value.trim();
-        if (!apiKey) throw new Error("Gemini API anahtarını gir.");
+        if (!apiKey) throw new Error(provider.label + " API anahtarını gir.");
 
-        log("çeviri: " + items.length + " blok tek istekte gönderiliyor...");
+        log("çeviri: " + items.length + " blok tek istekte " + provider.label + " servisine gönderiliyor...");
+        var keys = {};
+        keys[provider.id] = apiKey;
         return MangaTRTranslate.translate(items, {
+          provider: provider.id,
           model: els.model.value,
-          apiKey: apiKey
+          apiKeys: keys
         }).then(function (payload) {
           var map = {};
           (payload.results || []).forEach(function (r) {
@@ -167,6 +216,10 @@
         els.run.disabled = false;
       });
   }
+
+  fillProviders();
+  applyProvider();
+  els.provider.addEventListener("change", applyProvider);
 
   els.file.addEventListener("change", function () {
     var file = els.file.files && els.file.files[0];

@@ -22,32 +22,81 @@
   </header>
 
   <section>
+    <p class="legend">Çeviri servisi</p>
+
     <label class="field">
-      <span>Gemini API anahtarı</span>
-      <input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="AIza...">
+      <span>Servis</span>
+      <select id="provider"></select>
     </label>
-    <p class="hint" id="keyState">Anahtar girilmedi.</p>
+    <p class="hint" id="providerHint"></p>
+
+    <label class="field">
+      <span>API anahtarı</span>
+      <input type="password" id="apiKey" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </label>
+    <div class="actions">
+      <button id="saveKey" type="button" class="primary">Kaydet</button>
+      <button id="testKey" type="button">Test et</button>
+    </div>
+    <p class="hint" id="keyState">Anahtar kaydedilmedi.</p>
+
+    <label class="field" id="modelField">
+      <span>Model</span>
+      <select id="model"></select>
+    </label>
+    <label class="field" id="customBaseField" hidden>
+      <span>Sunucu adresi</span>
+      <input type="text" id="customBase" autocomplete="off" spellcheck="false" placeholder="https://sunucu/v1">
+    </label>
+    <label class="field" id="customModelField" hidden>
+      <span>Model adı</span>
+      <input type="text" id="customModel" autocomplete="off" spellcheck="false" placeholder="model-adi">
+    </label>
   </section>
 
   <section>
-    <label class="field">
-      <span>Model</span>
-      <select id="model">
-        <option value="gemini-2.5-flash">gemini-2.5-flash (hızlı)</option>
-        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (en ucuz)</option>
-        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+    <p class="legend">Dil</p>
+    <label class="row">
+      <span>Yapay zeka algılasın<small>Önerilen. Her sayfanın dili kendiliğinden bulunur.</small></span>
+      <input type="checkbox" id="autoLanguage" checked>
+    </label>
+    <label class="field" id="sourceField" hidden>
+      <span>Elle seçilen dil</span>
+      <select id="sourceLanguages">
+        <option value="ja">Japonca (manga)</option>
+        <option value="ko">Korece (webtoon)</option>
+        <option value="zh">Çince</option>
+        <option value="en">İngilizce</option>
+        <option value="es">İspanyolca</option>
+        <option value="pt">Portekizce</option>
+        <option value="id">Endonezce</option>
+        <option value="fr">Fransızca</option>
+        <option value="de">Almanca</option>
+        <option value="it">İtalyanca</option>
+        <option value="ru">Rusça</option>
+        <option value="tr">Türkçe (sayfaya dokunma)</option>
       </select>
     </label>
+    <p class="hint" id="langState">Her sayfa kendi dilinde okunur ve çevrilir.</p>
   </section>
 
   <section>
+    <p class="legend">Görünüm</p>
     <label class="row">
-      <span>Yazı boyutu</span>
+      <span>Yazı boyutu<small>Aslına yakın boyutta başlar.</small></span>
       <input type="range" id="fontScale" min="0.7" max="1.4" step="0.05">
       <b id="fontScaleValue">1.00</b>
     </label>
     <label class="row">
-      <span>Orijinali gizle</span>
+      <span>Yazı tipi</span>
+      <select id="fontFamily">
+        <option value="auto">Otomatik (aslına yakın)</option>
+        <option value="rounded">Yuvarlak (çizgi roman)</option>
+        <option value="clean">Sade (düz okunur)</option>
+      </select>
+    </label>
+    <label class="row">
+      <span>Orijinali temizle<small>Üstünü silip çeviriyi aynı yere yazar.</small></span>
       <input type="checkbox" id="hideOriginal">
     </label>
     <label class="row">
@@ -57,10 +106,13 @@
   </section>
 
   <section class="footer">
-    <button id="clearCache" type="button">Çeviri önbelleğini temizle</button>
+    <button id="clearCache" type="button">Önbelleği temizle</button>
     <span id="cacheSize" class="hint"></span>
   </section>
 
+  <script src="bridge.js"></script>
+  <script src="lang.js"></script>
+  <script src="providers.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

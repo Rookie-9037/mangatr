@@ -11,6 +11,8 @@
    * scaled down by CSS. Text drawn at image resolution then downsamples
    * cleanly instead of being upscaled. */
   var MAX_OVERLAY_PIXELS = 6000000;
+  // iOS refuses to allocate a 2D canvas context past roughly this on either axis.
+  var MAX_CANVAS_EDGE = 4000;
   var PREFETCH_MARGIN = "300px";
 
   var settings = MangaTR.DEFAULTS;
@@ -84,6 +86,34 @@
     return Math.sqrt(MAX_OVERLAY_PIXELS / pixels);
   }
 
+  /* Safari will not hand out a 2D context for a canvas taller than this on iOS,
+   * and a webtoon strip scaled to the pixel budget is routinely 12000px tall.
+   * So the overlay becomes several canvases stacked over one image, each
+   * covering a horizontal band and each drawing with a vertical offset. */
+  function overlaySlices(img, scale) {
+    var totalHeight = Math.max(1, Math.round(img.naturalHeight * scale));
+    var count = Math.max(1, Math.ceil(totalHeight / MAX_CANVAS_EDGE));
+    var band = Math.ceil(totalHeight / count);
+
+    var slices = [];
+    for (var i = 0; i < count; i++) {
+      var top = i * band;
+      var bottom = Math.min(totalHeight, top + band);
+      if (top >= bottom) break;
+      slices.push({
+        top: top,
+        height: bottom - top,
+        // Image-space y the band starts at, so a slice can be told where it
+        // sits without knowing anything about the other bands.
+        origin: top / scale,
+        cssTop: (top / totalHeight) * 100,
+        cssHeight: ((bottom - top) / totalHeight) * 100,
+        canvas: null
+      });
+    }
+    return slices;
+  }
+
   function attachOverlay(img) {
     var existing = state.get(img);
     if (existing) return existing;
@@ -101,17 +131,22 @@
     }
 
     var scale = canvasScaleFor(img);
-    var canvas = document.createElement("canvas");
-    canvas.className = "mangatr-canvas is-loading";
-    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    host.appendChild(canvas);
+    var slices = overlaySlices(img, scale);
+    slices.forEach(function (slice) {
+      var canvas = document.createElement("canvas");
+      canvas.className = "mangatr-canvas is-loading";
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, slice.height);
+      canvas.style.width = "100%";
+      canvas.style.height = slice.cssHeight + "%";
+      canvas.style.top = slice.cssTop + "%";
+      slice.canvas = canvas;
+      host.appendChild(canvas);
+    });
 
     var entry = {
       host: host,
-      canvas: canvas,
+      slices: slices,
       scale: scale,
       origin: origin,
       sampler: null,
@@ -131,7 +166,9 @@
   /* Puts the page back exactly as it was. Anything that is not a translated
    * manga page must not stay wrapped, or ordinary sites pay for our mistake. */
   function unwrap(entry, img) {
-    if (entry.canvas && entry.canvas.parentNode) entry.canvas.parentNode.removeChild(entry.canvas);
+    entry.slices.forEach(function (slice) {
+      if (slice.canvas && slice.canvas.parentNode) slice.canvas.parentNode.removeChild(slice.canvas);
+    });
     if (entry.host && entry.host.parentNode) {
       entry.host.parentNode.removeChild(entry.host);
     }
@@ -148,11 +185,17 @@
   }
 
   function repaint(entry) {
-    if (!entry || !entry.blocks.length || !entry.canvas.isConnected || !entry.sampler) return;
-    var ctx = entry.canvas.getContext("2d");
-    ctx.setTransform(entry.scale, 0, 0, entry.scale, 0, 0);
-    MangaTROverlay.render(entry.canvas, entry.sampler, entry.blocks, entry.translations, settings);
-    entry.canvas.classList.remove("is-loading");
+    if (!entry || !entry.blocks.length || !entry.sampler) return;
+    var live = false;
+    entry.slices.forEach(function (slice) {
+      if (!slice.canvas || !slice.canvas.isConnected) return;
+      live = true;
+      var ctx = slice.canvas.getContext("2d");
+      ctx.setTransform(entry.scale, 0, 0, entry.scale, 0, -slice.origin * entry.scale);
+      MangaTROverlay.render(slice.canvas, entry.sampler, entry.blocks, entry.translations, settings);
+      slice.canvas.classList.remove("is-loading");
+    });
+    return live;
   }
 
   function repaintAll() {
@@ -164,7 +207,7 @@
 
   // ------------------------------------------------------------- processing
 
-  function applyTranslations(entry, blocks, payload, img) {
+  function applyTranslations(entry, blocks, payload, img, sourceLabel) {
     var map = {};
     ((payload && payload.results) || []).forEach(function (item) {
       if (item.text) map[item.id] = item.text;
@@ -184,10 +227,11 @@
     }
 
     repaint(entry);
+    var prefix = sourceLabel ? sourceLabel + " · " : "";
     setPill(
       count < blocks.length
-        ? "MangaTR: " + count + "/" + blocks.length + " çevrildi"
-        : "MangaTR: " + count + " metin çevrildi",
+        ? "MangaTR: " + prefix + count + "/" + blocks.length + " çevrildi"
+        : "MangaTR: " + prefix + count + " metin çevrildi",
       true
     );
   }
@@ -234,10 +278,28 @@
           return null;
         }
 
-        return MangaTROCR.recognize(img).then(function (result) {
+        return MangaTROCR.recognize(img, settings, function (done, total) {
+          // blocks is not known yet at this point, so the count is left out;
+          // what matters here is that something is visibly happening.
+          setPill("MangaTR: sayfa okunuyor " + done + "/" + total + " parça…");
+        }).then(function (result) {
           var blocks = MangaTROverlay.clusterBoxes(result.boxes || []);
           if (!blocks.length) {
             unwrap(entry, img);
+            return null;
+          }
+
+          // Only now that we have text can we tell what language it is. A page
+          // that is already Turkish must be left exactly as it is: erasing the
+          // lettering and handing the model the same words back is pure damage.
+          var detected = MangaTRLang.detect(
+            blocks.map(function (block) {
+              return block.text;
+            }).join("\n")
+          );
+          if (detected.isTurkish) {
+            unwrap(entry, img);
+            setPill("MangaTR: sayfa zaten Türkçe, dokunulmadı", true);
             return null;
           }
 
@@ -256,12 +318,44 @@
             return { id: block.id, text: block.text };
           });
 
-          setPill("MangaTR: " + blocks.length + " metin çevriliyor…");
-          return MangaTR.send({ type: "translate", items: items }).then(function (reply) {
+          // Script detection settles Japanese, Korean and Chinese on its own.
+          // For Latin pages a short bubble carries too little signal for a
+          // word list, so the model is asked to name the language too and its
+          // answer is used when the local guess came back empty.
+          var sourceLabel = MangaTRLang.describe(detected, settings);
+          setPill(
+            "MangaTR: " +
+              (sourceLabel ? sourceLabel + " · " : "") +
+              blocks.length +
+              " metin çevriliyor…"
+          );
+          return MangaTR.send({
+            type: "translate",
+            items: items,
+            source: { code: detected.code, label: sourceLabel }
+          }).then(function (reply) {
             if (!reply || !reply.ok) {
               throw new Error((reply && reply.error) || "çeviri bağlantısı koptu");
             }
-            applyTranslations(entry, blocks, reply.result, img);
+            var payload = reply.result;
+
+            // The model can recognise a Turkish page the word list missed, for
+            // instance a fan scan in Latin script with almost no particles.
+            if (
+              payload.language === "tr" &&
+              (!detected.code || detected.code === "unknown")
+            ) {
+              unwrap(entry, img);
+              setPill("MangaTR: sayfa Türkçe görünüyor, dokunulmadı", true);
+              return;
+            }
+
+            var resolvedLabel = sourceLabel;
+            if (!resolvedLabel && payload.language) {
+              resolvedLabel = MangaTRLang.LABELS[payload.language] || "";
+            }
+            entry.sourceLabel = resolvedLabel;
+            applyTranslations(entry, blocks, payload, img, resolvedLabel);
           });
         });
       })

@@ -14,8 +14,12 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
     private final class Session {
         let chunks: Int
+        let languages: [String]
         var parts: [Int: Data] = [:]
-        init(chunks: Int) { self.chunks = chunks }
+        init(chunks: Int, languages: [String]) {
+            self.chunks = chunks
+            self.languages = languages
+        }
         var assembled: Data? {
             var buffer = Data(capacity: 1 << 20)
             for index in 0..<chunks {
@@ -62,7 +66,10 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         switch action {
         case "ocrBegin":
             lock.lock()
-            sessions[id] = Session(chunks: payload["chunks"] as? Int ?? 0)
+            sessions[id] = Session(
+                chunks: payload["chunks"] as? Int ?? 0,
+                languages: VisionOCR.visionLanguages(for: payload["lang"] as? String)
+            )
             lock.unlock()
             result = ["ok": true]
 
@@ -95,7 +102,10 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
                 break
             }
             do {
-                let ocr = try VisionOCR.run(data: data)
+                let ocr = try VisionOCR.run(
+                    data: data,
+                    languages: session?.languages ?? VisionOCR.automaticLanguages
+                )
                 result = [
                     "ok": true,
                     "w": ocr.width,

@@ -62,15 +62,16 @@
       <input type="file" id="file" accept="image/*">
     </div>
     <div>
-      <label for="key">Gemini API anahtarı</label>
+      <label for="provider">Servis</label>
+      <select id="provider"></select>
+    </div>
+    <div>
+      <label for="key">API anahtarı</label>
       <input type="password" id="key" placeholder="AIza..." autocomplete="off">
     </div>
     <div>
       <label for="model">Model</label>
-      <select id="model">
-        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-      </select>
+      <select id="model"></select>
     </div>
     <div>
       <label for="scale">Yazı boyutu</label>
@@ -103,31 +104,8 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
-<script>
-  // translator.js beklediği tek global. Tarayıcıda eklenti deposu yok, bellekte tutuyoruz.
-  var MangaTR = {
-    DEFAULTS: { model: "gemini-2.5-flash" },
-    hash: (function () {
-      return function (text) {
-        var h = 0;
-        for (var i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
-        return String(h);
-      };
-    })(),
-    api: function () {
-      return {
-        storage: {
-          local: {
-            get: function () { return Promise.resolve({}); },
-            set: function () { return Promise.resolve(); },
-            remove: function () { return Promise.resolve(); }
-          }
-        },
-        runtime: { getManifest: function () { return { version: "preview" }; } }
-      };
-    }
-  };
-</script>
+<script src="preview-shim.js"></script>
+<script src="../Extension/Resources/providers.js"></script>
 <script src="../Extension/Resources/overlay.js"></script>
 <script src="../Extension/Resources/translator.js"></script>
 <script src="preview.js"></script>

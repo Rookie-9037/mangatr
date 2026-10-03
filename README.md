@@ -3,7 +3,7 @@
 [![Build](https://github.com/Rookie-9037/mangatr/actions/workflows/build-ipa.yml/badge.svg)](https://github.com/Rookie-9037/mangatr/actions/workflows/build-ipa.yml)
 
 iPhone ve iPad için manga çeviri uygulaması. Bir manga sayfasına girdiğinde
-görselin üzerindeki Japonca metni cihazda tanır, Gemini ile Türkçeye çevirir ve
+görselin üzerindeki metni cihazda tanır, seçtiğin servisle Türkçeye çevirir ve
 balonun içine yazar — sayfa akışı bozulmadan, sanki manga baştan Türkçe
 yayımlanmış gibi okunur.
 
@@ -12,9 +12,10 @@ yayımlanmış gibi okunur.
 | Aşama | Nerede | Ne oluyor |
 |---|---|---|
 | Görsel bulma | Content script | Sadece manga sayfası gibi büyük görselleri işler, sayfaya neredeyse dokunmaz |
-| OCR | Cihaz içi (Vision) | `ja-JP` tanıma, dikey (tategaki) metin desteği, sunucuya görsel gitmez |
+| OCR | Cihaz içi (Vision) | 10 dilli tanıma, dikey (tategaki) metin desteği, sunucuya görsel gitmez |
+| Dil algılama | Content script + model | Betik imzası (kana/hangul/han) kesin, Latin diller stopword + model tahmini |
 | Kümeleştirme | Content script | Vision'ın çevirdiği satır parçaları tek balonda birleştirilir |
-| Çeviri | Gemini Flash | Sayfadaki tüm balonlar tek istekte, JSON şemasıyla |
+| Çeviri | Seçilen servis | Gemini / DeepSeek / Groq / OpenRouter / kendi sunucun; JSON şemasıyla toplu istek |
 | Yerleştirme | Canvas overlay | Orijinal yazı kapatılır, Türkçe metin balona sığdırılır |
 
 Metin cihazda tanındığı için ilk açılıştan itibaren hızlıdır; çeviri sonucu
@@ -31,13 +32,16 @@ node tools\serve.js
 ```
 
 Sonra tarayıcıda **http://localhost:8123/tools/preview.html** adresini aç, bir
-manga sayfası seç, Gemini anahtarını gir, "Çevir"e bas.
+manga sayfası seç, servis seç, API anahtarını gir, "Çevir"e bas.
 
-Bu sayfa `Extension/Resources/overlay.js` ve `translator.js` dosyalarını
-**gerçekten yükler** — yani gördüğün sonuç iPad'de alacağın sonucun aynısı.
-Tek farkı OCR: burada Tesseract kullanılır, cihazda iOS'un Vision'ı.
+Bu sayfa `Extension/Resources/overlay.js`, `providers.js` ve `translator.js`
+dosyalarını **gerçekten yükler** — yani gördüğün sonuç iPad'de alacağın sonucun
+aynısı. Tek farkı OCR: burada Tesseract kullanılır, cihazda iOS'un Vision'ı.
 Tesseract'ın Japonca tanıması zayıftır, dolayısıyla önizlemede yazıları bulan
 kadar gösteremeyebilir; iPad'deki uygulama çok daha isabetli olacak.
+
+Önizlemenin kablolaması `node tools\preview-check.js` ile sınanır; eklenti
+tarafına yeni bir bağımlılık eklenip önizlemede unutulursa test kırılır.
 
 ## Kurulum (Mac olmadan)
 
@@ -68,8 +72,18 @@ Alternatif: [AltStore](https://altstore.io) ya da
 5. **Eklentiyi aç.** *Ayarlar → Uygulamalar → Safari → Eklentiler → MangaTR →
    Aç*.
 
-6. **API anahtarını gir.** Safari'de MangaTR simgesine dokun, anahtarı yapıştır.
-   Ücretsiz anahtar için [Google AI Studio](https://aistudio.google.com/apikey).
+6. **Servisi seç ve API anahtarını gir.** Safari'de MangaTR simgesine dokun,
+   listeden servisi seç, anahtarı yapıştır ve **Kaydet**'e bas. Anahtar yazıldığı
+   anda saklanır, eklentiyi kapatınca sorulmaz. **Test et** ile bağlantı hemen
+   sınanır.
+
+   | Servis | Anahtar nereden |
+   |---|---|
+   | Google Gemini | [Google AI Studio](https://aistudio.google.com/apikey) |
+   | DeepSeek | [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
+   | Groq | [console.groq.com/keys](https://console.groq.com/keys) |
+   | OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys) |
+   | Özel sunucu | OpenAI uyumlu herhangi bir adres (Ollama, LM Studio, Together…) |
 
 ### Apple ID hesabı
 
@@ -89,10 +103,12 @@ open MangaTR.xcodeproj
 
 ## API anahtarı güvenliği
 
-Anahtar eklentinin kendi `browser.storage.local` alanında tutulur; sayfanın
-JavaScript'i erişemez. Yine de cihazda açık metin saklanır — ücretsiz Google
-anahtarı kullanmak bu yüzden makul. Anahtarı girip açtıktan sonra **Ayarlar →
-Privacy → Dizin Arama**'da engelleyebilirsin.
+Anahtar eklentinin kendi `browser.storage.local` alanında **servis başına** tutulur
+(DeepSeek anahtarı Google'a gitmez); sayfanın JavaScript'i erişemez. Yine de cihazda
+açık metin saklanır — bu yüzden ücretsiz, düşük kotalı bir anahtar kullanmak
+makul. Anahtarı girip açtıktan sonra **Ayarlar → Privacy → Dizin Arama**'da
+engelleyebilirsin. Birden çok servise anahtar girip sırayla deneyebilirsin;
+her servinin anahtarı ayrı saklanır.
 
 ## Dosya düzeni
 
@@ -100,18 +116,21 @@ Privacy → Dizin Arama**'da engelleyebilirsin.
 App/                        SwiftUI ana uygulama (kurulum rehberi)
 Extension/
   SafariWebExtensionHandler.swift   JS <-> yerel köprü, parçalı görsel aktarımı
-  VisionOCR.swift                   Vision tabanlı ja-JP OCR
+  VisionOCR.swift                   çok dilli Vision OCR
   Resources/
     manifest.json            MV2 manifesti (iOS 15 uyumlu)
     bridge.js                paylaşılan ayarlar / mesajlaşma
+    lang.js                  betik + stopword tabanlı yerel dil algılama
     ocr.js                  görsel hazırlama + parçalı native aktarım
-    translator.js           Gemini batch çeviri + önbellek
+    providers.js             Gemini / DeepSeek / Groq / OpenRouter / özel sunucu
+    translator.js           toplu çeviri + yeniden deneme + önbellek
     overlay.js              balon kapatma + Türkçe yerleştirme
     content.js              sayfa orkestrasyonu
     popup.*                 ayar paneli
 Supporting/                 Info.plist dosyaları
 project.yml                 XcodeGen spesifikasyonu
 .github/workflows/          bulut derleme
+tools/                      derleme dışı testler (lang, translate, overlay)
 tools/make-icons.ps1        ikon üretici
 ```
 
@@ -121,8 +140,12 @@ Eklenti simgesi (Safari'de "puzzle" veya `Aa` menüsü) üzerinden:
 
 | Ayar | Anlamı |
 |---|---|
-| Gemini API anahtarı | Zorunlu. Anahtar eklentinin kendi deposunda, sayfa erişemez |
-| Model | `gemini-2.5-flash` varsayılan. `flash-lite` ucuz, `2.0-flash` yedek |
+| Servis | Gemini, DeepSeek, Groq, OpenRouter veya özel sunucu |
+| API anahtarı | Zorunlu. Seçili servisin anahtarı kaydedilir, sayfa erişemez |
+| Model | Servise göre değişir; Gemini'de `gemini-2.5-flash` varsayılan, `2.0-flash` yedek |
+| Özel sunucu adresi / modeli | Yalnız "Özel sunucu" seçiliyken görünür |
+| Kaynak dili | "Otomatik algıla" varsayılan. Elle seçim gelişmiş ayarlardadır |
+| Yazı tipi | `Otomatik` / `Yuvarlak` / `Temiz` — orijinal balon yazısına yakın |
 | Yazı boyutu | Türkçe metnin balondaki göreli boyutu, 0.7–1.4 |
 | Orijinali gizle | **Kapalıyken MangaTR sayfaya hiç dokunmaz.** Yani çeviri yapılmaz. Balonları silmeden üstlerine yazmak, sayfayı okunamaz hâle getirdiği için bu ayar bilinçli olarak "hepsi ya da hiç" |
 | Durum rozeti | Sağ alt köşedeki ilerleme bildirimi |
@@ -130,12 +153,15 @@ Eklenti simgesi (Safari'de "puzzle" veya `Aa` menüsü) üzerinden:
 
 ## Bilinen sınırlar
 
-- Vision'ın Japonca OCR'ı mükemmel değil; el yazısı (sütun) fontlarında ve çok
-  küçük punto ses efektlerinde hata yapabilir.
+- Vision'ın OCR'ı mükemmel değil; el yazısı (sütun) fontlarında ve çok
+  küçük punto ses efektlerinde hata yapabilir. Endonezce için Vision'ın `id-ID`
+  modeli yok, o dil Latin tanımaya düşüyor.
 - Ekran tonlu (screentone) arka planlarda bölge, metnin çevresinden temiz bir
   doku parçası kopyalanarak kapatılır. Bulunamazsa düz renk kullanılır ve
   hafif bir leke kalabilir.
 - Dikey Japonca metin yatay Türkçe olarak çizilir. Bu bilinçli bir tercih: dikey
   Latin harfleri okunmuyor.
-- Çeviri tamamen cihazda değil, Gemini üzerinden ağ ile yapılır. Metin gönderilir,
-  görsel gönderilmez.
+- Çeviri tamamen cihazda değil, seçtiğin servis üzerinden ağ ile yapılır. Metin
+  gönderilir, görsel gönderilmez.
+- Önizleme aracı `<canvas>`, CSS arka planı veya sayfanın kendi metnini değil,
+  yalnızca `<img>` içindeki görseli işler — iOS'taki seçici de aynı sınırla.

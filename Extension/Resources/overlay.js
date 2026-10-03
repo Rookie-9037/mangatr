@@ -11,7 +11,20 @@
 var MangaTROverlay = (function () {
   "use strict";
 
-  var FONT_STACK = '-apple-system, "SF Pro Text", "Helvetica Neue", "Hiragino Sans", sans-serif';
+  /* Font choice is a compromise: a hand-lettered manga face has no Turkish
+ * counterpart, so the goal is metrics and colour that sit naturally in the
+ * balloon rather than a literal match. iOS ships these, and the stack falls
+ * through to the system face if one is missing. */
+var FONT_STACKS = {
+  auto: '-apple-system, "SF Pro Rounded", "SF Pro Text", "Avenir Next", "Hiragino Sans", sans-serif',
+  rounded: '"SF Pro Rounded", "Arial Rounded MT Bold", "Chalkboard SE", "Avenir Next", -apple-system, sans-serif',
+  clean: '-apple-system, "SF Pro Text", "Helvetica Neue", "Hiragino Sans", sans-serif'
+};
+
+function fontStack(settings) {
+  return FONT_STACKS[(settings && settings.fontFamily) || "auto"] || FONT_STACKS.auto;
+}
+
   var ANALYSIS_MAX_EDGE = 1000;
 
   // ---------------------------------------------------------------- helpers
@@ -295,12 +308,18 @@ var MangaTROverlay = (function () {
       var padX = Math.min(lineHeight * 0.42, 34);
       var padY = Math.min(lineHeight * 0.3, 22);
 
+      // Typical glyph height of the original lettering, used later to typeset
+      // at a comparable size.
+      var glyphHeights = members.map(function (m) { return m.height; }).sort(function (a, b) { return a - b; });
+      var glyph = glyphHeights[glyphHeights.length >> 1];
+
       var block = {
         x: Math.max(0, minX - padX),
         y: Math.max(0, minY - padY),
         width: maxX - minX + padX * 2,
         height: maxY - minY + padY * 2,
         vertical: isVertical({ width: maxX - minX, height: maxY - minY }),
+        lineHeight: glyph,
         text: ""
       };
 
@@ -341,6 +360,7 @@ var MangaTROverlay = (function () {
         width: block.width,
         height: block.height,
         vertical: block.vertical,
+        lineHeight: block.lineHeight,
         text: block.text,
         id: block.id
       };
@@ -443,42 +463,52 @@ var MangaTROverlay = (function () {
     return lines;
   }
 
-  function fitBlock(ctx, text, block, settings) {
-    var padX = block.width * 0.07;
-    var padY = block.height * 0.05;
-    var availableWidth = Math.max(10, block.width - padX * 2);
-    var availableHeight = Math.max(8, block.height - padY * 2);
-    var weight = block.vertical ? 700 : 600;
+  /* Turkish needs to be set at roughly the size of the lettering it replaces, or
+   the page stops looking like the same page. `block.lineHeight` is the height of
+   a single OCR line in the original, which is a far better size cue than the
+   block's height: a three-line balloon and a one-line balloon in the same panel
+   get the same treatment only if the line height is respected. */
+function fitBlock(ctx, text, block, settings) {
+  var padX = block.width * 0.07;
+  var padY = block.height * 0.05;
+  var availableWidth = Math.max(10, block.width - padX * 2);
+  var availableHeight = Math.max(8, block.height - padY * 2);
+  var weight = block.vertical ? 700 : 600;
+  var stack = fontStack(settings);
 
-    var size = clamp(block.height * 0.62, 8, 110) * (settings.fontScale || 1);
-    var floor = 7;
-    var best = null;
+  // Original glyph height, with a floor for panels where OCR reported a very
+  // short run, and a ceiling so a translation can never overflow its balloon.
+  var lineHint = block.lineHeight && block.lineHeight > 0 ? block.lineHeight : block.height;
+  var natural = Math.min(block.height * 0.62, lineHint * 1.02);
+  var size = clamp(natural, 8, 110) * (settings.fontScale || 1);
+  var floor = 7;
+  var best = null;
 
-    for (var attempt = 0; attempt < 46 && size >= floor; attempt++, size *= 0.94) {
-      ctx.font = weight + " " + size.toFixed(2) + "px " + FONT_STACK;
-      var lines = wrapText(ctx, text, availableWidth);
-      var lineHeight = size * 1.14;
-      if (lines.length * lineHeight <= availableHeight) {
-        best = { size: size, lines: lines, lineHeight: lineHeight };
-        break;
-      }
-    }
-
-    if (!best) {
-      size = floor;
-      ctx.font = weight + " " + size + "px " + FONT_STACK;
-      var lines = wrapText(ctx, text, availableWidth);
-      var lineHeight = size * 1.14;
-      var maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
-      if (lines.length > maxLines) {
-        lines = lines.slice(0, maxLines);
-        lines[maxLines - 1] = lines[maxLines - 1].replace(/.{1}$/, "\u2026");
-      }
+  for (var attempt = 0; attempt < 46 && size >= floor; attempt++, size *= 0.94) {
+    ctx.font = weight + " " + size.toFixed(2) + "px " + stack;
+    var lines = wrapText(ctx, text, availableWidth);
+    var lineHeight = size * 1.14;
+    if (lines.length * lineHeight <= availableHeight) {
       best = { size: size, lines: lines, lineHeight: lineHeight };
+      break;
     }
-
-    return best;
   }
+
+  if (!best) {
+    size = floor;
+    ctx.font = weight + " " + size + "px " + stack;
+    var lines = wrapText(ctx, text, availableWidth);
+    var lineHeight = size * 1.14;
+    var maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      lines[maxLines - 1] = lines[maxLines - 1].replace(/.{1}$/, "\u2026");
+    }
+    best = { size: size, lines: lines, lineHeight: lineHeight };
+  }
+
+  return best;
+}
 
   // ----------------------------------------------------------------- render
 
@@ -490,6 +520,18 @@ var MangaTROverlay = (function () {
       width: block.width + block.height * 0.5,
       height: block.height + block.height * 0.5
     });
+
+    // Vision's box is tight around the glyphs, but ink bleeds past it: outlines,
+    // drop shadows and the tail of a descender all sit outside. A few extra
+    // pixels of cover is the difference between a clean erase and a ghost of
+    // the original sentence under the Turkish one.
+    var bleed = Math.max(1, block.height * 0.06);
+    var area = {
+      x: block.x - bleed,
+      y: block.y - bleed,
+      width: block.width + bleed * 2,
+      height: block.height + bleed * 2
+    };
 
     // A balloon is a bright shape on a darker page; a narration box sits on the
     // artwork's own tone and must keep that texture.
@@ -508,14 +550,14 @@ var MangaTROverlay = (function () {
         donor.y * sampler.ratioY,
         donor.width * sampler.ratioX,
         donor.height * sampler.ratioY,
-        block.x,
-        block.y,
-        block.width,
-        block.height
+        area.x,
+        area.y,
+        area.width,
+        area.height
       );
     } else {
       ctx.beginPath();
-      roundedRect(ctx, block.x, block.y, block.width, block.height, radius);
+      roundedRect(ctx, area.x, area.y, area.width, area.height, radius + bleed);
       if (isBalloon) {
         // Never paint a balloon darker than paper stock; manga pages are read
         // on white, and a grey balloon would look like a rendering bug.
@@ -545,10 +587,18 @@ var MangaTROverlay = (function () {
     ctx.closePath();
   }
 
-  /* blocks: [{ id, x, y, width, height, text }], translations: { id: text }. */
+  /* blocks: [{ id, x, y, width, height, text }], translations: { id: text }.
+   *
+   * The caller sets a transform first, which for a tall webtoon page also carries
+   * a vertical offset because the overlay is split across several canvases. The
+   * clear has to ignore that transform or it would start at the slice edge and
+   * leave stale pixels behind. */
   function render(canvas, sampler, blocks, translations, settings) {
     var ctx = canvas.getContext("2d");
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
     var usable = blocks.filter(function (block) {
       return translations[block.id];
@@ -573,10 +623,24 @@ var MangaTROverlay = (function () {
         width: block.width,
         height: block.height
       });
-      ctx.fillStyle = backgroundLuma > 132 ? "rgb(18,18,20)" : "rgb(250,250,252)";
+      var dark = backgroundLuma > 132;
+      ctx.fillStyle = dark ? "rgb(18,18,20)" : "rgb(250,250,252)";
+      // A mid-tone patch defeats a single ink colour either way, so give the
+      // glyphs a thin outline of the opposite one. Cheap, and it keeps webtoon
+      // panels with screentone backgrounds readable.
+      if (backgroundLuma > 96 && backgroundLuma < 170) {
+        ctx.lineJoin = "round";
+        ctx.miterLimit = 2;
+        ctx.lineWidth = Math.max(1.5, fitted.size * 0.09);
+        ctx.strokeStyle = dark ? "rgb(252,252,254)" : "rgb(16,16,18)";
+      } else {
+        ctx.lineWidth = 0;
+      }
+
       var centerX = block.x + block.width / 2;
       var startY = block.y + block.height / 2 - ((fitted.lines.length - 1) * fitted.lineHeight) / 2;
       fitted.lines.forEach(function (line, index) {
+        if (ctx.lineWidth > 0) ctx.strokeText(line, centerX, startY + index * fitted.lineHeight);
         ctx.fillText(line, centerX, startY + index * fitted.lineHeight);
       });
     });

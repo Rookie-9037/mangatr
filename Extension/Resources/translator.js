@@ -1,38 +1,30 @@
-/* Gemini translation layer. Runs in the background page so the page's own
- * scripts never see the API key and so one batched request can cover a whole
- * manga page instead of one request per balloon. */
+/* Translation layer. Runs in the background page so the page's own scripts
+ * never see the API key and so one batched request can cover a whole manga page
+ * instead of one request per balloon.
+ *
+ * The actual HTTP call belongs to MangaTRProviders; this file owns the parts
+ * that are the same whichever model answers: how a page of dialogue is batched,
+ * how failures degrade, and what is cached between reads. */
 var MangaTRTranslate = (function () {
   "use strict";
 
-  var ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/";
   var BATCH_SIZE = 24;
   var MAX_PARALLEL = 2;
-  var FALLBACK_MODEL = "gemini-2.0-flash";
-  var CACHE_PREFIX = "tr:v1:";
+  var CACHE_PREFIX = "tr:v2:";
 
-  var SYSTEM = [
-    "Sen profesyonel bir manga çevirmenis. Japonca manga konuşma balonlarını ve anlatım kutularını doğal, akıcı Türkçeye çevirirsin.",
-    "Kurallar:",
-    "- Anlamı aktar, uydurma veya özetleme.",
-    "- Balon kısa kalsın; gereksiz sözcük ekleme.",
-    "- Hitapları (さん, 君, おれ, 俺) Türkçe konuşma tonuna uygun biçimde ver.",
-    "- Onomatopoeiyi (ドン, バン, ズズ…) Türkçeye uygun ses taklidi olarak çevir.",
-    "- Noktalama ve ünlemleri koru.",
-    "- Romaji yazma, açıklama ekleme, tırnak içinde çeviri verme.",
-    "- Her girdi için tam olarak bir çıktı üret, girdi sırasını koru."
-  ].join("\n");
-
-  var SCHEMA = {
-    type: "array",
-    items: {
-      type: "object",
-      properties: {
-        id: { type: "integer" },
-        tr: { type: "string" }
-      },
-      required: ["id", "tr"]
-    }
+  /* Per-language advice, because hitaphandling and onomatopoeia work nothing
+   * like each other. Falls back to a neutral note for languages we have no
+   * specific rule for, so a new source language never blocks a translation. */
+  var LOCAL_NOTES = {
+    ja: "- Hitapları (さん, 君, おれ, 俺) Türkçe konuşma tonuna uygun biçimde ver.\n- Onomatopoeiyi (ドン, バン, ズズ…) Türkçeye uygun ses taklidi olarak çevir.",
+    ko: "- Hitapları (-씨, -님) Türkçe konuşma tonuna uygun biçimde ver.\n- Onomatopoeiyi (쿵, 툭) Türkçeye uygun ses taklidi olarak çevir.",
+    zh: "- Onomatopoeiyi (砰, 轟) Türkçeye uygun ses taklidi olarak çevir.",
+    en: "- Konuşma dilini koru; günlük İngilizce konuşma tonunu abartma.\n- Arka plan efektlerini Türkçeye uygun ses taklidi olarak çevir.",
+    es: "- Konuşma dilini koru; günlük İspanyolca konuşma tonunu abartma.\n- Arka plan efektlerini Türkçeye uygun ses taklidi olarak çevir."
   };
+
+  var LATIN_NOTE =
+    "- Konuşma dilini koru, günlük konuşma tonunu abartma.\n- Arka plan efektlerini Türkçeye uygun ses taklidi olarak çevir.";
 
   var cache = null;
 
@@ -41,6 +33,8 @@ var MangaTRTranslate = (function () {
       setTimeout(resolve, ms);
     });
   }
+
+  // ------------------------------------------------------------------ cache
 
   function loadCache() {
     if (cache) return Promise.resolve(cache);
@@ -72,12 +66,15 @@ var MangaTRTranslate = (function () {
     });
   }
 
-  function cacheKey(model, text) {
-    return model + "|" + MangaTR.hash(text);
+  /* Provider and model are part of the key: DeepSeek's rendering of a line is
+   * not Gemini's, and mixing them would show the user inconsistent wording for
+   * the same balloon later. */
+  function cacheKey(provider, model, text) {
+    return provider + "|" + model + "|" + MangaTR.hash(text);
   }
 
-  /* A page can contribute hundreds of balloons over a long reading session;
-   * cap the map so storage.local does not grow without bound. */
+  /* A long reading session can contribute thousands of balloons; cap the map so
+   * storage.local does not grow without bound. */
   function trimCache() {
     var keys = Object.keys(cache);
     if (keys.length <= 8000) return;
@@ -87,87 +84,120 @@ var MangaTRTranslate = (function () {
     });
   }
 
-  function buildPrompt(items) {
-    var payload = items.map(function (item) {
-      return { id: item.id, ja: item.text };
-    });
-    return (
-      "Aşağıdaki manga metinlerini Türkçeye çevir. " +
-      "Çıktı, her girdi için { id, tr } alanlarından oluşan bir JSON dizisi olsun. " +
-      "id değerlerini aynen koru.\n\n" +
-      JSON.stringify(payload)
-    );
+  // ------------------------------------------------------------- resolution
+
+  /* Keys are kept per provider so switching back and forth does not mean typing
+   * the same key twice, and so a DeepSeek key is never sent to Google. */
+  function resolveSettings(settings) {
+    var provider = MangaTRProviders.has(settings.provider) ? settings.provider : "gemini";
+    var providerInfo = MangaTRProviders.get(provider);
+
+    var keys = settings.apiKeys && typeof settings.apiKeys === "object" ? settings.apiKeys : {};
+    var key = keys[provider] || "";
+    // A key saved by an older build lived in a single `apiKey` field and could
+    // only ever have been Gemini's.
+    if (!key && provider === "gemini" && settings.apiKey) key = settings.apiKey;
+
+    var model;
+    if (provider === "custom") {
+      // A custom endpoint has no model list to validate against, and
+      // `settings.model` still holds the previously selected provider's model,
+      // so only the explicitly typed one may be used here.
+      model = String(settings.customModel || "").trim();
+    } else {
+      model = settings.model;
+      var known = (providerInfo.models || []).indexOf(model) !== -1;
+      if (!model || !known) model = providerInfo.defaultModel;
+    }
+
+    return {
+      id: provider,
+      provider: providerInfo,
+      key: key.trim(),
+      model: model,
+      base: provider === "custom" ? String(settings.customBase || "").trim() : ""
+    };
   }
 
-  function callModel(model, apiKey, prompt, attempt) {
-    attempt = attempt || 0;
-    var url = ENDPOINT + encodeURIComponent(model) + ":generateContent";
-    var body = {
-      systemInstruction: { parts: [{ text: SYSTEM }] },
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.25,
-        topP: 0.95,
-        maxOutputTokens: 8192,
-        responseMimeType: "application/json",
-        responseSchema: SCHEMA
-      }
-    };
+  // ------------------------------------------------------------------ prompt
 
-    return fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify(body)
-    }).then(function (response) {
+  /* `source` is what the page's own detector found. It is passed to the model as
+   * a hint only: script detection is decisive for CJK, but a short English or
+   * Spanish bubble can be genuinely ambiguous offline, and the model resolves
+   * that better than a stopword list. */
+  function buildPrompt(items, sourceCode, sourceLabel) {
+    var payload = items.map(function (item) {
+      return { id: item.id, src: item.text };
+    });
+
+    var head =
+      "Aşağıdaki metinleri Türkçeye çevir. " +
+      "Kaynak dil: " +
+      (sourceLabel ? sourceLabel + " (" + sourceCode + ")" : "sen anla, emin değilsen tahmin et") +
+      ". " +
+      'Yanıt tam olarak {"lang":"<kaynak dil kodu>","items":[{"id":0,"tr":"..."}]} biçiminde olsun. ' +
+      "id değerlerini aynen koru.";
+
+    var note = (sourceCode && LOCAL_NOTES[sourceCode]) || LATIN_NOTE;
+
+    return head + "\n" + note + "\n\n" + JSON.stringify(payload);
+  }
+
+  // ------------------------------------------------------------------- calls
+
+  function callOnce(target, provider, prompt, attempt) {
+    attempt = attempt || 0;
+
+    var request = provider.request(prompt, target.model, target.key, {
+      temperature: 0.25,
+      // Without this the OpenAI-compatible adapter has no address to call for a
+      // self-hosted endpoint, and the request never leaves the page.
+      base: target.base
+    });
+
+    return fetch(request.url, request.init).then(function (response) {
       if (response.ok) return response.json();
 
-      if (response.status === 404 && model !== FALLBACK_MODEL) {
-        // Older API keys and some regions do not expose 2.5 yet.
-        return callModel(FALLBACK_MODEL, apiKey, prompt, attempt);
-      }
-      if ((response.status === 429 || response.status >= 500) && attempt < 2) {
-        return sleep(700 * (attempt + 1)).then(function () {
-          return callModel(model, apiKey, prompt, attempt + 1);
-        });
-      }
       return response.text().then(function (bodyText) {
-        var error = new Error("Gemini HTTP " + response.status + ": " + bodyText.slice(0, 300));
-        error.status = response.status;
-        throw error;
+        // Gemini 404s when the account cannot see the requested model; retrying
+        // once on the older model turns a hard failure into a working page.
+        if (response.status === 404 && target.fallbackModel && target.model !== target.fallbackModel) {
+          var retry = Object.assign({}, target, { model: target.fallbackModel });
+          return callOnce(retry, provider, prompt, 0);
+        }
+        if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+          return sleep(700 * (attempt + 1)).then(function () {
+            return callOnce(target, provider, prompt, attempt + 1);
+          });
+        }
+        throw new Error(MangaTRProviders.explainStatus(target.provider, response.status, bodyText));
       });
     });
   }
 
-  function parseReply(payload) {
-    var candidates = (payload && payload.candidates) || [];
-    for (var i = 0; i < candidates.length; i++) {
-      var parts = (candidates[i].content && candidates[i].content.parts) || [];
-      for (var j = 0; j < parts.length; j++) {
-        if (parts[j].text) {
-          try {
-            var parsed = JSON.parse(parts[j].text);
-            if (Array.isArray(parsed)) return parsed;
-          } catch (error) {
-            /* fall through to the next candidate part */
-          }
-        }
+  function normalise(parsed, items) {
+    var byId = {};
+    (parsed.items || []).forEach(function (entry) {
+      if (entry && typeof entry.id === "number" && typeof entry.tr === "string") {
+        byId[entry.id] = entry.tr.trim();
       }
-    }
-    throw new Error("Gemini yanıtı çözümlenemedi");
+    });
+
+    return {
+      // Some models answer with the original words when they refuse to
+      // translate. Treating that as success would paint the page back onto
+      // itself, so a verbatim echo is dropped instead.
+      items: items.map(function (item) {
+        return { id: item.id, text: byId[item.id] || "" };
+      }),
+      lang: typeof parsed.lang === "string" ? parsed.lang.toLowerCase().slice(0, 5) : ""
+    };
   }
 
-  function translateBatch(items, model, apiKey) {
-    return callModel(model, apiKey, buildPrompt(items)).then(function (payload) {
-      var parsed = parseReply(payload);
-      var byId = {};
-      parsed.forEach(function (entry) {
-        if (entry && typeof entry.id === "number" && typeof entry.tr === "string") {
-          byId[entry.id] = entry.tr.trim();
-        }
-      });
-      return items.map(function (item) {
-        return { id: item.id, text: byId[item.id] || "" };
-      });
+  function translateBatch(items, target, provider, sourceCode, sourceLabel) {
+    var prompt = buildPrompt(items, sourceCode, sourceLabel);
+    return callOnce(target, provider, prompt, 0).then(function (payload) {
+      return normalise(provider.parse(payload), items);
     });
   }
 
@@ -183,11 +213,14 @@ var MangaTRTranslate = (function () {
     function worker() {
       if (index >= tasks.length) return Promise.resolve();
       var current = index++;
-      return tasks[current]().then(function (value) {
-        results[current] = { ok: true, value: value };
-      }, function (error) {
-        results[current] = { ok: false, error: error };
-      }).then(worker);
+      return tasks[current]().then(
+        function (value) {
+          results[current] = { ok: true, value: value };
+        },
+        function (error) {
+          results[current] = { ok: false, error: error };
+        }
+      ).then(worker);
     }
     var workers = [];
     for (var i = 0; i < Math.min(limit, tasks.length); i++) workers.push(worker());
@@ -196,27 +229,61 @@ var MangaTRTranslate = (function () {
     });
   }
 
-  /* items: [{ id, text }] -> [{ id, text }]. Already-cached entries cost no
-   * network; anything still missing is sent in as few requests as possible. */
-  function translate(items, settings) {
-    if (!items.length) return Promise.resolve({ results: [], errors: [] });
+  // -------------------------------------------------------------- public API
 
-    var model = settings.model || "gemini-2.5-flash";
-    var apiKey = settings.apiKey;
+  /* items: [{ id, text }] -> [{ id, text }], plus the language the model
+   * reported so the page can tell the user what it thought it was reading. */
+  function translate(items, settings, source) {
+    if (!items.length) return Promise.resolve({ results: [], errors: [], language: "" });
+
+    var resolved = resolveSettings(settings || {});
+    var sourceCode = source && source.code;
+    var sourceLabel = source && source.label;
+
+    if (!resolved.key) {
+      return Promise.resolve({
+        results: [],
+        errors: [{ error: "API anahtarı yok. Eklenti simgesine dokun, " + resolved.provider.label + " anahtarını kaydet." }],
+        language: ""
+      });
+    }
+
+    // Checked here rather than inside the request builder: a missing model or
+    // address is a configuration mistake, and reporting it up front keeps a
+    // throw inside the batch runner from turning the whole page into one
+    // opaque failure.
+    if (!resolved.model) {
+      return Promise.resolve({
+        results: [],
+        errors: [{ error: "Model seçilmedi. Eklenti ayarlarından bir model yaz." }],
+        language: ""
+      });
+    }
+
+    if (resolved.id === "custom" && !resolved.base) {
+      return Promise.resolve({
+        results: [],
+        errors: [{ error: "Sunucu adresi boş. Eklenti ayarlarından OpenAI uyumlu adresi yaz." }],
+        language: ""
+      });
+    }
+
+    var provider = resolved.provider;
+    var target = {
+      model: resolved.model,
+      key: resolved.key,
+      base: resolved.base,
+      provider: provider,
+      fallbackModel: provider.fallbackModel
+    };
 
     return loadCache().then(function () {
-      if (!apiKey) {
-        return {
-          results: [],
-          errors: [{ error: "API anahtarı girilmedi. Eklenti simgesine dokunup anahtarı kaydet." }]
-        };
-      }
-
       var pending = [];
       var results = [];
+      var languages = [];
 
       items.forEach(function (item) {
-        var key = cacheKey(model, item.text);
+        var key = cacheKey(resolved.id, resolved.model, item.text);
         if (cache[key]) {
           results.push({ id: item.id, text: cache[key], cached: true });
         } else {
@@ -224,18 +291,23 @@ var MangaTRTranslate = (function () {
         }
       });
 
-      if (!pending.length) return { results: results, errors: [] };
+      function collectLanguages(entries) {
+        entries.forEach(function (entry) {
+          if (entry.language) languages.push(entry.language);
+        });
+      }
 
-      var batches = chunk(pending, BATCH_SIZE);
-      var tasks = batches.map(function (batch) {
+      if (!pending.length) return { results: results, errors: [], language: languages[0] || "" };
+
+      var tasks = chunk(pending, BATCH_SIZE).map(function (batch) {
         return function () {
-          return translateBatch(batch, model, apiKey).then(function (translated) {
-            // Remap through the batch order so ids survive the model's reorder.
-            return batch.map(function (source, i) {
-              var text = translated[i] ? translated[i].text : "";
-              if (text) cache[source.cacheKey] = text;
+          return translateBatch(batch, target, provider, sourceCode, sourceLabel).then(function (parsed) {
+            var texts = batch.map(function (source, i) {
+              var text = parsed.items[i] ? parsed.items[i].text : "";
+              if (text && text !== source.text) cache[source.cacheKey] = text;
               return { id: source.id, text: text };
             });
+            return { items: texts, language: parsed.lang };
           });
         };
       });
@@ -244,22 +316,26 @@ var MangaTRTranslate = (function () {
         var errors = [];
         batchResults.forEach(function (entry) {
           if (entry.ok) {
-            entry.value.forEach(function (item) {
+            entry.value.items.forEach(function (item) {
               results.push({ id: item.id, text: item.text });
             });
+            collectLanguages([entry.value]);
           } else {
             errors.push({ error: String(entry.error && entry.error.message ? entry.error.message : entry.error) });
           }
         });
         trimCache();
         flushCache();
-        return { results: results, errors: errors };
+        // The first batch's answer is as good a guess as any; the rest of a page
+        // is the same language.
+        return { results: results, errors: errors, language: languages[0] || "" };
       });
     });
   }
 
   return {
     translate: translate,
+    resolveSettings: resolveSettings,
     clearCache: clearCache,
     cacheSize: function () {
       return loadCache().then(function (c) {

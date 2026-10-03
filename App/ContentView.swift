@@ -20,8 +20,8 @@ struct ContentView: View {
 
                     StepCard(
                         number: 2,
-                        title: "Anahtarı gir",
-                        detail: "Safari'de MangaTR eklenti simgesine dokun, API anahtarını yapıştır. gemini-2.5-flash modeli için yeterli."
+                        title: "Servis seç ve anahtarı gir",
+                        detail: "Safari'de MangaTR eklenti simgesine dokun. Google Gemini, DeepSeek, Groq, OpenRouter ya da kendi sunucunu seç, anahtarı yapıştır ve Kaydet'e bas. Anahtar eklentiye kaydedilir; uygulamayı kapatınca silinmez."
                     )
 
                     StepCard(
@@ -60,7 +60,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("MangaTR")
                 .font(.largeTitle.bold())
-            Text("Japonca manga sayfalarını gerçek zamanlıda Türkçeye çevirip sayfa üzerine yazar. Metinler cihazda (Vision) tanınır, çeviri Gemini ile yapılır.")
+            Text("Manga ve webtoon sayfalarındaki metni gerçek zamanlıda Türkçeye çevirip sayfa üzerine yazar. Metinler cihazda (Vision) tanınır, çeviri Gemini, DeepSeek, Groq, OpenRouter veya kendi sunucun ile yapılır.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -71,7 +71,9 @@ struct ContentView: View {
             Text("Sorun Giderme")
                 .font(.headline)
             bullet("Balonlar boğun kaldı: eklenti kapalı olabilir, simjeye dokunup açık yap.")
-            bullet("Çeviri hiç başlamıyor: eklenti simgesinde API anahtarı girili mi kontrol et.")
+            bullet("Çeviri hiç başlamıyor: eklenti simgesinde doğru servis seçili mi ve API anahtarı kaydedilmiş mi kontrol et. Test et düğmesi bağlantıyı sınar.")
+            bullet("Anahtarı kaydettikten sonra tekrar soruluyor: eklenti simgesini aç, anahtarın yanında “Kaydedildi ✓” yazmasını bekle.")
+            bullet("Yanlış çeviri: eklenti ayarlarındaki dil seçimini “Otomatik algıla” yerine elle seçebilirsin.")
             bullet("Sayfa hiç değişmiyor: “Orijinali gizle” anahtarı kapalıysa MangaTR dokunmaz. Anahtar açıkken çeviri yapılır.")
             bullet("Metin çok büyük: eklenti ayarındaki yazı boyutunu düşür.")
         }
