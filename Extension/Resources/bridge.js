@@ -18,7 +18,10 @@ var MangaTR = (function () {
     // detection plus the model decide what language a page is in.
     sourceLanguages: "auto",
     provider: "gemini",
-    model: "gemini-2.5-flash",
+    // Must match a model that a brand new key can actually reach: Google's 2.x
+    // line is restricted or shut down, so shipping 2.5 as the default meant
+    // every fresh install failed on its first run.
+    model: "gemini-3.8-flash",
     // Keys live per provider so switching services never reuses one vendor's
     // secret for another.
     apiKeys: {},

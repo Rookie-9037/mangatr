@@ -159,20 +159,45 @@ var MangaTRTranslate = (function () {
       if (response.ok) return response.json();
 
       return response.text().then(function (bodyText) {
-        // Gemini 404s when the account cannot see the requested model; retrying
-        // once on the older model turns a hard failure into a working page.
-        if (response.status === 404 && target.fallbackModel && target.model !== target.fallbackModel) {
-          var retry = Object.assign({}, target, { model: target.fallbackModel });
-          return callOnce(retry, provider, prompt, 0);
+        // A 404 means the key cannot see that model, not that the key is bad:
+        // Google answers this way for every project that has not used a model
+        // before, and vendors retire models on their own schedule. So walk the
+        // provider's list instead of trusting one hardcoded fallback that is
+        // itself eventually retired.
+        if (response.status === 404) {
+          var step = nextModel(provider, target);
+          if (step) {
+            var retry = Object.assign({}, target, { model: step.model, tried: step.tried });
+            return callOnce(retry, provider, prompt, 0);
+          }
         }
         if ((response.status === 429 || response.status >= 500) && attempt < 2) {
           return sleep(700 * (attempt + 1)).then(function () {
             return callOnce(target, provider, prompt, attempt + 1);
           });
         }
-        throw new Error(MangaTRProviders.explainStatus(target.provider, response.status, bodyText));
+        throw new Error(
+          MangaTRProviders.explainStatus(target.provider, response.status, bodyText, target.model)
+        );
       });
     });
+  }
+
+  /* The next model on the provider's list that this call has not already tried,
+   * together with the updated tried-list. Returning the grown list is what stops
+   * the walk: a fixed fallback cannot do this, and a list that is not carried
+   * forward just re-requests the first candidate forever.
+   * Returns null once the list is exhausted, which turns a 404 into an error. */
+  function nextModel(provider, target) {
+    var models = provider.models || [];
+    var tried = target.tried || [];
+    if (tried.indexOf(target.model) === -1) tried = tried.concat([target.model]);
+    for (var i = 0; i < models.length; i++) {
+      if (tried.indexOf(models[i]) === -1) {
+        return { model: models[i], tried: tried };
+      }
+    }
+    return null;
   }
 
   function normalise(parsed, items) {
@@ -271,10 +296,10 @@ var MangaTRTranslate = (function () {
     var provider = resolved.provider;
     var target = {
       model: resolved.model,
+      tried: [resolved.model],
       key: resolved.key,
       base: resolved.base,
-      provider: provider,
-      fallbackModel: provider.fallbackModel
+      provider: provider
     };
 
     return loadCache().then(function () {

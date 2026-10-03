@@ -110,11 +110,19 @@ var GEMINI = {
   docsUrl: "https://aistudio.google.com/apikey",
   keyHint: /^AIza/,
   keyPlaceholder: "AIza…",
-  models: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
-  defaultModel: "gemini-2.5-flash",
-  // Older free keys and some regions only expose 2.0, so keep a fallback
-  // rather than failing the whole page on a 404.
-  fallbackModel: "gemini-2.0-flash",
+  /* Google's model line moves fast and access is not uniform: 2.0 is shut down
+   * entirely, and 2.5 answers 404 for any project that has not used it before —
+   * which is every brand new key. So the list leads with the current stable
+   * models and keeps 2.5 last for older projects that still have access. */
+  models: [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite"
+  ],
+  defaultModel: "gemini-3.8-flash",
   system: CHAT_SYSTEM,
 
   request: function (prompt, model, key, options) {
@@ -131,8 +139,9 @@ var GEMINI = {
           systemInstruction: { parts: [{ text: GEMINI.system }] },
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: settings.temperature == null ? 0.25 : settings.temperature,
-            topP: 0.95,
+            // Sampling parameters are left out on purpose: the 3.x migration
+            // notes drop them, and pinning the output with the JSON schema below
+            // is what actually keeps the answer in shape.
             maxOutputTokens: 8192,
             responseMimeType: "application/json",
             responseSchema: GEMINI_SCHEMA
@@ -259,14 +268,20 @@ var PROVIDERS = [
   }
 
   /* Vendors all word their errors differently; the user only needs to know
-   * whether to fix the key, the model, or the network. */
-  function explainStatus(provider, status, text) {
+   * whether to fix the key, the model, or the network. `model` is the one that
+   * actually failed — naming the first model on the list instead sent people
+   * looking at a model they had never selected. */
+  function explainStatus(provider, status, text, model) {
     var detail = String(text || "").slice(0, 200);
     if (status === 401 || status === 403) {
       return "Anahtar geçersiz (" + status + "). " + provider.hint;
     }
     if (status === 404) {
-      return "Model bulunamadı: " + (provider.models[0] || "?") + ". Model adını kontrol et.";
+      var attempted = model || provider.models[0] || "?";
+      return (
+        "Model bulunamadı: " + attempted + " (" + status + "). " +
+        "Bu anahtar bu modele erişemiyor; listedeki başka bir modeli dene."
+      );
     }
     if (status === 402) {
       // DeepSeek and the other metered vendors answer with the raw vendor JSON

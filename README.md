@@ -150,7 +150,7 @@ Eklenti simgesi (Safari'de "puzzle" veya `Aa` menüsü) üzerinden:
 |---|---|
 | Servis | Gemini, DeepSeek, Groq, OpenRouter veya özel sunucu |
 | API anahtarı | Zorunlu. Seçili servisin anahtarı kaydedilir, sayfa erişemez |
-| Model | Servise göre değişir; Gemini'de `gemini-2.5-flash` varsayılan, `2.0-flash` yedek |
+| Model | Servise göre değişir; Gemini'de `gemini-3.8-flash` varsayılan. Model erişimi anahtara göre değişir: yeni anahtarlar 2.x serisini göremez (Google 404 döner) |
 | Özel sunucu adresi / modeli | Yalnız "Özel sunucu" seçiliyken görünür |
 | Kaynak dili | "Otomatik algıla" varsayılan. Elle seçim gelişmiş ayarlardadır |
 | Yazı tipi | `Otomatik` / `Yuvarlak` / `Temiz` — orijinal balon yazısına yakın |

@@ -297,9 +297,16 @@ Translate.translate([{ id: 0, text: SPANISH }], gemini, { code: "es", label: "İ
           calls.push({ url: String(url) });
           return errorResponse(404, "model not found");
         };
-        return Translate.translate([{ id: 0, text: MISSING_MODEL_TEXT }], gemini, null).then(function () {
-          check("404 yedek model denendi", urls.length === 2, "istek=" + urls.length);
-          check("yedek model gemini-2.0-flash", urls[1].indexOf("gemini-2.0-flash") !== -1, urls[1]);
+        return Translate.translate([{ id: 0, text: MISSING_MODEL_TEXT }], gemini, null).then(function (reply) {
+          /* A 404 must walk the provider's list instead of one hardcoded
+           * fallback, then stop — the old single-fallback model is now
+           * retired upstream, so a fixed name would fail forever. */
+          const list = Providers.get("gemini").models;
+          check("404 listedeki diğer modelleri denedi", urls.length > 1, "istek=" + urls.length);
+          check("404 model listesi tükendiğinde durdu", urls.length === list.length, urls.length + "/" + list.length);
+          check("404 ikinci istek sıradaki model", urls[1].indexOf(list[0]) !== -1, urls[1]);
+          check("404 sonunda hata verdi", reply.errors.length === 1 && reply.results.length === 0);
+          check("404 mesajı denenen modeli söylüyor", /bulunamadı/i.test(reply.errors[0].error), reply.errors[0].error);
         });
       })
       .then(function () {
