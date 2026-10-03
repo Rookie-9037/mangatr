@@ -547,8 +547,12 @@ var PROVIDERS = [
           hint: provider.hint,
           docsUrl: provider.docsUrl,
           keyPlaceholder: provider.keyPlaceholder,
-          models: provider.models,
-          defaultModel: provider.defaultModel
+models: provider.models,
+             defaultModel: provider.defaultModel,
+             // The popup decides whether OCR has any path at all from this flag,
+             // so it has to survive the copy: without it every service looks
+             // image-blind and Gemini is reported as unable to read images.
+             supportsVision: !!provider.supportsVision
         };
       });
     },

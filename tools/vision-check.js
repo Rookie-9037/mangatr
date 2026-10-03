@@ -120,6 +120,16 @@ function seed(settings) {
 check("gemini görsel okumayı destekliyor", Providers.get("gemini").supportsVision === true);
 check("deepseek görsel okumuyor", !Providers.get("deepseek").supportsVision);
 
+/* The popup never sees the internal provider objects, only what list() hands
+ * over. Dropping the flag there made the popup insist Gemini could not read
+ * images while telling the user to choose Gemini. */
+const listed = {};
+Providers.list().forEach((p) => { listed[p.id] = p; });
+check("servis listesi görsel yeteneğini taşıyor", listed.gemini.supportsVision === true,
+  String(listed.gemini.supportsVision));
+check("görsel okumayan servis doğru işaretli", listed.deepseek.supportsVision === false);
+check("görsel okumayan listede false olarak geçiyor", listed.groq.supportsVision === false);
+
 const request = Providers.get("gemini").visionRequest(
   { b64: "AAAA", mime: "image/png" },
   "gemini-3.6-flash",
