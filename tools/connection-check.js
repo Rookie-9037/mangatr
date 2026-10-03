@@ -260,9 +260,9 @@ send({ type: "settings:test" }).then(function (reply) {
   // --------------------------------------------- elle "Bu sayfayı çevir"
 
   return send({ type: "ocr:run" }).then(function (reply) {
-    check("sayfa tetiği aktif sekmeye gitti", tabMessages.length === 1 && tabMessages[0].id === 7,
+    check("sayfa tetiği aktif sekmeye gitti", tabMessages.length === 2 && tabMessages[0].id === 7,
       JSON.stringify(tabMessages));
-    check("sayfaya doğru mesaj gönderildi", tabMessages[0].message.type === "ocr:run");
+    check("sayfaya doğru mesaj gönderildi", tabMessages[1].message.type === "ocr:run");
     check("kuyruk bilisi döndü", reply.ok === true && reply.result.queued === 2, JSON.stringify(reply));
 
     /* A PDF viewer or a chrome:// page has no content script, and the page's own
@@ -272,11 +272,31 @@ send({ type: "settings:test" }).then(function (reply) {
     tabReply = () => undefined;
     return send({ type: "ocr:run" });
   }).then(function (reply) {
-    check("yanıt yoksa anlaşılır hata veriyor",
-      reply.ok === false && /çalışmıyor/i.test(reply.error), reply.error);
+    check("içerik betiği yoksa izin yolu gösteriliyor",
+      reply.ok === false && /izin ver/i.test(reply.error), reply.error);
+    check("önce ping atıldı", tabMessages.length === 2 && tabMessages[0].message.type === "ping",
+      JSON.stringify(tabMessages.map((m) => m.message.type)));
+
+    /* Script present but not answering: a reload is the fix, a permission
+     * change is not, so the two must not read the same. */
+    tabMessages = [];
+    tabReply = () => undefined;
+    ctx.browser.tabs.sendMessage = (id, message) => {
+      tabMessages.push({ id: id, message: message });
+      if (message.type === "ping") return Promise.resolve({ ok: true, images: 9, canvases: 1 });
+      return Promise.resolve(undefined);
+    };
+    return send({ type: "ocr:run" });
+  }).then(function (reply) {
+    check("betik yüklü ama sağırsa yenileme öneriliyor",
+      reply.ok === false && /yenile/i.test(reply.error), reply.error);
+    ctx.browser.tabs.sendMessage = (id, message) => {
+      tabMessages.push({ id: id, message: message });
+      return Promise.resolve(tabReply());
+    };
 
     tabMessages = [];
-    tabReply = () => ({ ok: false, error: "Sayfada çevrilecek büyük görsel bulunamadı" });
+    tabReply = () => ({ ok: false, error: "Sayfada çevrilecek büyük görsel bulunamadı (9 görsel tarandı)" });
     return send({ type: "ocr:run" });
   }).then(function (reply) {
     check("sayfa bulamadıysa hata yüzeye çıktı",

@@ -492,6 +492,7 @@
 
     return {
       images: images.length,
+      canvases: document.querySelectorAll("canvas").length,
       painted: painted.length,
       queued: targets.length
     };
@@ -544,37 +545,6 @@
     refreshSettings().then(function () {
       scan();
 
-      MangaTR.api().runtime.onMessage.addListener(function (message, sender, sendResponse) {
-        if (message && message.type === "settings:changed") {
-          settings = message.settings;
-          repaintAll();
-          if (settings.enabled) scheduleScan();
-          return false;
-        }
-        if (message && message.type === "ocr:run") {
-          /* Answers synchronously with what it queued, so the popup can tell
-           * "queued nothing" apart from "working on it". The translation itself
-           * is async and reports through the on-page pill. */
-          if (!settings.enabled) {
-            sendResponse({ ok: false, error: "MangaTR kapalı" });
-            return false;
-          }
-          var result = forceRun();
-          sendResponse(
-            result.queued
-              ? result
-              : {
-                  ok: false,
-                  error: "Sayfada çevrilecek büyük görsel bulunamadı" +
-                    (result.painted ? "" : " (" + result.images + " görsel tarandı)"),
-                  detail: result
-                }
-          );
-          return false;
-        }
-        return false;
-      });
-
       // Font size and erasing only need a repaint, not a re-translation.
       MangaTR.api().storage.onChanged.addListener(function (changes, area) {
         if (area !== "local") return;
@@ -600,8 +570,71 @@
           if (!tracked.length && !diagStats.eligible) explainSilence();
         }
       }, 1200);
+    }).catch(function (error) {
+      /* Without this the page just sits there: every later stage is chained
+       * onto this promise, so one failure at startup silently disables the whole
+       * extension with no way to tell it apart from "nothing to translate". */
+      setPill("MangaTR başlatılamadı: " + String((error && error.message) || error), true);
     });
   }
+
+  /* Registered synchronously as the script runs, deliberately *not* inside
+   * start()'s promise chain.
+   *
+   * A listener registered after an async hop simply does not exist if that hop
+   * fails, and the page goes completely deaf while looking perfectly healthy:
+   * the popup's manual trigger got no answer and reported "MangaTR is not
+   * running here" about a script that was loaded and running. Being able to
+   * answer "ping" is what makes that case distinguishable from Safari not having
+   * injected the script at all. */
+  MangaTR.api().runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (!message || !message.type) return false;
+
+    if (message.type === "ping") {
+      sendResponse({
+        ok: true,
+        images: document.querySelectorAll("img").length,
+        canvases: document.querySelectorAll("canvas").length
+      });
+      return false;
+    }
+
+    if (message.type === "settings:changed") {
+      settings = message.settings;
+      repaintAll();
+      if (settings.enabled) scheduleScan();
+      return false;
+    }
+
+    if (message.type === "ocr:run") {
+      /* Settings are re-read here rather than trusted from the closure, because
+       * this listener can fire before -- or instead of -- start() succeeding. */
+      refreshSettings()
+        .then(function () {
+          if (!settings.enabled) throw new Error("MangaTR kapalı");
+          var result = forceRun();
+          if (result.queued) return result;
+          /* Naming the cause is the whole point of the button: "no big image"
+           * and "the reader draws to a canvas" need completely different fixes,
+           * and neither is obvious from the outside. */
+          if (!result.painted && result.canvases) {
+            throw new Error(
+              "Sayfa " + result.canvases + " canvas'a çiziliyor, MangaTR yalnız <img> okuyor " +
+                "(" + result.images + " görsel var)"
+            );
+          }
+          throw new Error(
+            "Sayfada çevrilecek büyük görsel bulunamadı (" + result.images + " görsel tarandı)"
+          );
+        })
+        .then(sendResponse, function (error) {
+          sendResponse({ ok: false, error: String((error && error.message) || error) });
+        });
+      return true;
+    }
+
+    return false;
+  });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true });

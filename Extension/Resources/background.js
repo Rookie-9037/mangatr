@@ -130,14 +130,29 @@
         if (!tabs || !tabs.length || tabs[0].id === undefined) {
           throw new Error("Açık sekme bulunamadı");
         }
-        return MangaTR.api().tabs.sendMessage(tabs[0].id, { type: "ocr:run" }).then(function (reply) {
-          /* A reader that answers with its own unrelated handler, or no content
-           * script at all (a PDF viewer, a chrome:// page), shows up as an empty
-           * reply rather than an exception. */
-          if (!reply) throw new Error("Bu sayfada MangaTR çalışmıyor");
-          if (reply.ok === false && reply.error) throw new Error(reply.error);
-          return reply;
-        });
+        var tabId = tabs[0].id;
+        /* Ping first. An empty reply is ambiguous on its own -- it means either
+           "Safari never injected the content script" (a per-site permission
+           thing, fixable in Settings) or "the script is there but deaf". The
+           two need different advice, so they are told apart here. */
+        return MangaTR.api().tabs.sendMessage(tabId, { type: "ping" })
+          .catch(function () {
+            return null;
+          })
+          .then(function (pong) {
+            return MangaTR.api().tabs.sendMessage(tabId, { type: "ocr:run" }).then(function (reply) {
+              if (!reply) {
+                throw new Error(
+                  pong
+                    ? "MangaTR sayfada yüklü ama yanıt vermiyor — sayfayı yenile"
+                    : "Bu sayfada MangaTR çalışmıyor. Safari → Ayarlar → Eklentiler → MangaTR " +
+                      "→ bu siteye izin ver"
+                );
+              }
+              if (reply.ok === false && reply.error) throw new Error(reply.error);
+              return reply;
+            });
+          });
       });
     },
 
