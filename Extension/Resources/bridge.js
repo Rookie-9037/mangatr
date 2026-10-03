@@ -1,4 +1,4 @@
-/* Shared plumbing for the background page and content scripts.
+﻿/* Shared plumbing for the background page and content scripts.
  * Manifest v2 content scripts share one isolated world, so a top-level var is
  * how these files see each other. */
 var MangaTR = (function () {
@@ -36,6 +36,9 @@ var MangaTR = (function () {
   };
 
   var nativeSupport = null;
+
+  /* Set by background.js. See nativeAvailable() for why it matters. */
+  var state = { isBackground: false };
 
   function api() {
     if (typeof browser !== "undefined") return browser;
@@ -83,8 +86,42 @@ var MangaTR = (function () {
 
   function nativeAvailable() {
     if (nativeSupport !== null) return Promise.resolve(nativeSupport);
-    return api()
-      .runtime.sendNativeMessage(APP_ID, { type: "ping" })
+
+    var runtime = api() && api().runtime;
+
+    /* Safari exposes runtime.sendNativeMessage to the background page only. From
+     * a content script the function is not failing, it is simply not there -- and
+     * calling it unguarded threw "sendNativeMessage is not a function", which
+     * escaped before the .catch below could see it and tore down the whole OCR
+     * pipeline. So the call is feature-detected, and where it is missing the
+     * probe is delegated to the one context that does have it. */
+    if (!runtime || typeof runtime.sendNativeMessage !== "function") {
+      if (!state.isBackground) {
+        return send({ type: "native:probe" })
+          .then(function (reply) {
+            if (!reply || !reply.ok) {
+              nativeSupport = false;
+              nativeError = (reply && reply.error) || "native köprüsü yok";
+              return false;
+            }
+            var probe = reply.result || {};
+            nativeSupport = !!probe.available;
+            nativeError = probe.error || "";
+            return nativeSupport;
+          })
+          .catch(function (error) {
+            nativeSupport = false;
+            nativeError = String((error && error.message) || error || "bilinmeyen hata");
+            return false;
+          });
+      }
+      nativeSupport = false;
+      nativeError = "bu bağlamda native mesajlaşma yok";
+      return Promise.resolve(false);
+    }
+
+    return runtime
+      .sendNativeMessage(APP_ID, { type: "ping" })
       .then(function (reply) {
         if (reply && reply.ok) {
           nativeSupport = true;
@@ -106,14 +143,22 @@ var MangaTR = (function () {
     return nativeError;
   }
 
+  /* Rejects instead of throwing: a synchronous TypeError here would bypass every
+   * caller's .catch and abort the pipeline the same way the probe did. */
   function native(message) {
-    return api().runtime.sendNativeMessage(APP_ID, message);
+    var runtime = api() && api().runtime;
+    if (!runtime || typeof runtime.sendNativeMessage !== "function") {
+      return Promise.reject(new Error("Bu bağlamda native mesajlaşma yok"));
+    }
+    return runtime.sendNativeMessage(APP_ID, message);
   }
 
   return {
     APP_ID: APP_ID,
     NATIVE_AVAILABLE: NATIVE_AVAILABLE,
     DEFAULTS: DEFAULTS,
+    /* Shared with background.js, which flips isBackground on load. */
+    state: state,
     api: api,
     hash: hash,
     getSettings: getSettings,

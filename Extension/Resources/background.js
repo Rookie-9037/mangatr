@@ -6,6 +6,12 @@
 
   var api = MangaTR.api();
 
+  /* bridge.js is shared between this page and the content scripts, and the fix
+   * for Safari's missing runtime.sendNativeMessage in content scripts depends on
+   * knowing which one is running: only a non-background context may delegate the
+   * probe back here. Without the flag the background page would ask itself. */
+  MangaTR.state.isBackground = true;
+
   function arrayBufferToBase64(buffer) {
     var bytes = new Uint8Array(buffer);
     var step = 0x8000;
@@ -181,8 +187,13 @@
       return MangaTRTranslate.cacheSize();
     },
 
+    /* Both the reason and the verdict travel together: "not available" is useless on
+     * its own, since the fix differs for a missing permission, an app that has
+     * not been launched yet, and a bridge that exists but fails. */
     "native:probe": function () {
-      return MangaTR.nativeAvailable();
+      return MangaTR.nativeAvailable().then(function (available) {
+        return { available: available, error: MangaTR.nativeErrorText() };
+      });
     },
 
     ping: function () {

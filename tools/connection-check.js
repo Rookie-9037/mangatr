@@ -82,6 +82,78 @@ vm.createContext(ctx);
 
 check("background mesaj dinleyicisi kaydedildi", typeof ctx.__listener === "function");
 
+/* Builds an isolated copy of the extension. The native-messaging scenarios have
+ * to run somewhere the probe has not already been answered, because the verdict
+ * is cached after the first call -- reusing the main context would silently test
+ * the cache instead of the delegation. */
+function freshContext(withNative, withBackground, probeReply) {
+  const c = {
+    console: console, setTimeout: setTimeout, clearTimeout: clearTimeout,
+    Promise: Promise, Date: Date, Math: Math, isFinite: isFinite,
+    btoa: (s) => Buffer.from(s, "binary").toString("base64"),
+    fetch: () => Promise.reject(new Error("kullanilmiyor"))
+  };
+  const runtime = {
+    getManifest: () => ({ version: "1.0.0" }),
+    onMessage: { addListener: (fn) => { c.__listener = fn; } },
+    sendMessage: () => Promise.resolve(probeReply || { ok: true, result: { available: false, error: "kopru yok" } })
+  };
+  if (withNative) runtime.sendNativeMessage = () => Promise.resolve({ ok: true });
+  c.browser = {
+    runtime: runtime,
+    storage: {
+      local: {
+        get: (defaults) => Promise.resolve(Object.assign({}, defaults)),
+        set: () => Promise.resolve(),
+        remove: () => Promise.resolve()
+      }
+    }
+  };
+  vm.createContext(c);
+  const files = withBackground
+    ? ["bridge.js", "lang.js", "providers.js", "translator.js", "background.js"]
+    : ["bridge.js"];
+  files.forEach((name) => vm.runInContext(read(name), c, { filename: name }));
+  return c;
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise.then((value) => ({ value: value }), (error) => ({ error: error })),
+    new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), ms))
+  ]);
+}
+
+function checkNoNativeContext() {
+  // A content script: bridge.js only, no sendNativeMessage, background not loaded.
+  const contentSide = freshContext(false, false);
+  return withTimeout(contentSide.MangaTR.nativeAvailable(), 2000).then(function (out) {
+    check("içerik betiği fırlatmıyor, false dönüyor",
+      out.value === false && !out.error && !out.timeout, JSON.stringify(out));
+    check("içerik betiği köprü sebebini aktardı",
+      /kopru yok/.test(contentSide.MangaTR.nativeErrorText() || ""),
+      contentSide.MangaTR.nativeErrorText());
+
+    // The background page without the function must give up rather than message
+    // itself: that path used to be a candidate for an unbreakable request loop.
+    const bg = freshContext(false, true);
+    const reply = new Promise((resolve) => bg.__listener({ type: "native:probe" }, {}, resolve));
+    return withTimeout(reply, 2000).then(function (bgOut) {
+      check("background kendine sormuyor", !bgOut.timeout, JSON.stringify(bgOut));
+      check("background temiz hata veriyor",
+        bgOut.value && bgOut.value.ok === true && bgOut.value.result.available === false &&
+        /native mesajlaşma yok/.test(bgOut.value.result.error || ""),
+        JSON.stringify(bgOut.value || bgOut.error || bgOut));
+    });
+  }).then(function () {
+    // Sanity: with the function present the direct path is still taken.
+    const withNative = freshContext(true, true);
+    return withTimeout(withNative.MangaTR.nativeAvailable(), 2000).then(function (out) {
+      check("native varsa doğrudan yoklama yapılıyor", out.value === true, JSON.stringify(out));
+    });
+  });
+}
+
 /* Sends a message the way the popup does and resolves with the reply object. */
 function send(message) {
   return new Promise(function (resolve) {
@@ -257,9 +329,23 @@ send({ type: "settings:test" }).then(function (reply) {
   });
   });
 }).then(function () {
-  // --------------------------------------------- elle "Bu sayfayı çevir"
-
-  return send({ type: "ocr:run" }).then(function (reply) {
+  /* Safari exposes runtime.sendNativeMessage to the background page only. In a
+   * content script the property is absent, and calling it unguarded threw a
+   * TypeError that escaped every .catch and aborted the OCR pipeline -- which is
+   * exactly why "3 pages queued" turned into "nothing happened". */
+  return send({ type: "native:probe" }).then(function (reply) {
+    check("native sınaması gerekçesiyle döndü",
+      reply.ok === true && reply.result && typeof reply.result.available === "boolean",
+      JSON.stringify(reply));
+    check("başarısız köprü sebebini taşıyor", typeof reply.result.error === "string",
+      JSON.stringify(reply.result));
+    return send({ type: "ping" });
+  }).then(function (reply) {
+    check("ping calisiyor", reply.ok === true && !!reply.result.version, JSON.stringify(reply));
+    return checkNoNativeContext();
+  }).then(function () {
+    return send({ type: "ocr:run" });
+  }).then(function (reply) {
     check("sayfa tetiği aktif sekmeye gitti", tabMessages.length === 2 && tabMessages[0].id === 7,
       JSON.stringify(tabMessages));
     check("sayfaya doğru mesaj gönderildi", tabMessages[1].message.type === "ocr:run");
