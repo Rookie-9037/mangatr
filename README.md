@@ -85,6 +85,14 @@ Alternatif: [AltStore](https://altstore.io) ya da
    | OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys) |
    | Özel sunucu | OpenAI uyumlu herhangi bir adres (Ollama, LM Studio, Together…) |
 
+   > **DeepSeek ücretlidir ve ön ödeme ister.** Yeni hesapta bakiye 0 ise
+   > `HTTP 402 insufficient balance` alırsın; anahtar geçerli, sadece kredi yok.
+   > Ücretsiz başlamak için **Gemini** veya **Groq** daha uygun.
+   >
+   > "Diğer (OpenAI uyumlu)" seçersen **Sunucu adresi** (`/v1` ile biten) ve
+   > **Model adı** kutuları açılır. Yerel sunucularda (Ollama, LM Studio) anahtar
+   > yok sayıldığı için o alana herhangi bir şey yazman yeterli.
+
 ### Apple ID hesabı
 
 - **Ücretsiz Apple ID:** imza 7 gün geçerli, haftada bir yeniden yüklemek gerekir.

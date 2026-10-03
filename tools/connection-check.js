@@ -154,12 +154,33 @@ send({ type: "settings:test" }).then(function (reply) {
       return send({ type: "settings:test" }).then(function (reply) {
         check("401 hata olarak döndü", reply.ok === false && /401/.test(reply.error), reply.error);
 
-        // ------------------------------------------------- bozuk model yanıtı
+// ------------------------------------------------- kredi yetersiz (402)
 
-        calls = [];
-        respondWith = () => okJson(chatPayload());
-        seed({ provider: "custom", customBase: "http://localhost:11434/v1", customModel: "qwen2.5:14b", apiKeys: { custom: "sk-local" } });
-        return send({ type: "settings:test" }).then(function (reply) {
+      seed({ provider: "deepseek", model: "deepseek-chat", apiKeys: { deepseek: "sk-test" } });
+      calls = [];
+      respondWith = () => Promise.resolve({
+        ok: false,
+        status: 402,
+        text: () => Promise.resolve('{"error":{"message":"insufficient balance","type":"billing_not_active","request_id":"abc"}}')
+      });
+      return send({ type: "settings:test" }).then(function (reply) {
+        check("402 kredi yetersizliği olarak anlatıldı",
+          reply.ok === false && /kredi yok/i.test(reply.error),
+          reply.error);
+        check("402'de ham vendor JSON sızmadı",
+          reply.ok === false && reply.error.indexOf("request_id") === -1,
+          reply.error);
+        check("402'de nereye bakılacağı söylendi",
+          reply.ok === false && /deepseek/i.test(reply.error),
+          reply.error);
+      });
+
+      // ------------------------------------------------- bozuk model yanıtı
+
+      calls = [];
+      respondWith = () => okJson(chatPayload());
+      seed({ provider: "custom", customBase: "http://localhost:11434/v1", customModel: "qwen2.5:14b", apiKeys: { custom: "sk-local" } });
+      return send({ type: "settings:test" }).then(function (reply) {
           check("özel sunucu sınaması başarılı", reply.ok === true, JSON.stringify(reply));
           check("özel sunucu adresi kullanıldı",
             calls[0] && calls[0].url === "http://localhost:11434/v1/chat/completions",

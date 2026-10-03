@@ -268,6 +268,19 @@ var PROVIDERS = [
     if (status === 404) {
       return "Model bulunamadı: " + (provider.models[0] || "?") + ". Model adını kontrol et.";
     }
+    if (status === 402) {
+      // DeepSeek and the other metered vendors answer with the raw vendor JSON
+      // here, which tells the user nothing they can act on. Prepaid balance is
+      // the single most common reason a first run fails.
+      return (
+        "Hesapta kredi yok (402). " + provider.label +
+        " ücretli çalışıyor; bakiye yüklemelisin ya da ücretsiz kotolu bir servis seç. " +
+        (provider.hint || "")
+      );
+    }
+    if (status === 400) {
+      return "İstek reddedildi (400). Model adı veya sunucu adresi yanlış olabilir. " + detail;
+    }
     if (status === 429) {
       return "Kota doldu veya hız sınırı (429). Biraz sonra tekrar dene.";
     }
