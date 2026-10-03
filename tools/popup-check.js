@@ -101,5 +101,22 @@ check("sınama isteği gönderiliyor", /type:\s*"settings:test"/.test(js));
 check("sınama sonucu okunuyor", /reply\.result\.model/.test(js));
 check("sınama hatası gösteriliyor", /reply && reply\.error/.test(js));
 
+// ------------------------------------------------------------------ OCR yolu
+
+/* With Vision unreachable on a free signing profile the popup must name the
+ * fallback rather than tell the user to reopen an app that cannot help. Two
+ * distinct messages: a vision provider still works (slowly), a non-vision one
+ * means no OCR at all until the service changes. */
+check("eski çıkmaz mesaj kalktı", !/uygulamayı bir kez aç/.test(js));
+check("görsel yedeğin yavaşlığı söyleniyor", /yavaş, görsel servise gider/.test(js));
+check("görsel okumayan servis uyarılıyor", /görsel okuyamaz — Google Gemini seç/.test(js));
+check("yedek yol servis adını kullanıyor", /provider\.label/.test(js));
+check("açılışta OCR durumu hesaplanıyor", /refreshOcrStatus\(settings\)/.test(js));
+check("servis değişince OCR durumu tazeleniyor", /refreshOcrStatus\(next \|\| settings\)/.test(js));
+check("aç/kapa düğmesi OCR durumunu ezmiyor", /refreshOcrStatus\(\{ provider: els\.provider\.value/.test(js));
+/* The decision reads the provider list that background.js already hands the
+ * popup, so it must not silently fall back to whatever is first in the array. */
+check("sağlayıcı kimliğine göre seçiliyor", /byId\[\(settings && settings\.provider\)/.test(js));
+
 console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");
 process.exit(failed ? 1 : 0);

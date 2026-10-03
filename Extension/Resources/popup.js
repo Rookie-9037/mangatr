@@ -230,21 +230,47 @@
     })
     .then(function (settings) {
       load(settings);
-      setStatus(settings.enabled ? "Etkin" : "Kapalı", settings.enabled ? "is-ok" : "is-warn");
       refreshCacheSize();
-
-return MangaTR.nativeAvailable().then(function (available) {
-        if (!available) {
-          setStatus(
-            "OCR bağlantısı yok (" + (MangaTR.nativeErrorText() || "bilinmeyen") + ") — uygulamayı bir kez aç",
-            "is-warn"
-          );
-        }
+      /* Deliberately not short-circuited on "Kapalı": a disabled extension whose
+         * OCR path is broken should say so before the user enables it. */
+      return refreshOcrStatus(settings).catch(function () {
+        setStatus(settings.enabled ? "Etkin" : "Kapalı", settings.enabled ? "is-ok" : "is-warn");
       });
     })
     .catch(function (error) {
       setStatus("Ayar okunamadı: " + (error && error.message ? error.message : error), "is-warn");
     });
+
+  /* Says which OCR path will actually run. "Native unavailable" stopped meaning
+     * "broken" once a vision model could stand in for Vision, and the two cases
+     * need very different reactions: one is merely slower, the other means no
+     * OCR at all until the service is changed. */
+  function ocrStatus(available, provider) {
+    if (available) return null;
+    var reason = MangaTR.nativeErrorText() || "bilinmeyen";
+    if (provider && provider.supportsVision) {
+      return {
+        text: "Cihazda OCR yok (" + reason + ") — sayfa görseli " + provider.label +
+          " ile okunacak (yavaş, görsel servise gider)",
+        cls: "is-warn"
+      };
+    }
+    return {
+      text: "OCR çalışmayacak: cihazda Vision yok (" + reason + ") ve " +
+        (provider ? provider.label : "seçili servis") + " görsel okuyamaz — Google Gemini seç",
+      cls: "is-warn"
+    };
+  }
+
+  function refreshOcrStatus(settings) {
+    var provider = byId[(settings && settings.provider) || "gemini"] || providers[0];
+    var on = !settings || settings.enabled !== false;
+    return MangaTR.nativeAvailable().then(function (available) {
+      var status = ocrStatus(available, provider);
+      if (status) setStatus(status.text, status.cls);
+      else setStatus(on ? "Etkin" : "Kapalı", on ? "is-ok" : "is-warn");
+    });
+  }
 
   // ---------------------------------------------------------------- events
 
@@ -252,9 +278,14 @@ return MangaTR.nativeAvailable().then(function (available) {
   bindCheckbox(els.hideOriginal, "hideOriginal");
   bindCheckbox(els.showPill, "showPill");
 
-  els.enabled.addEventListener("change", function () {
-    setStatus(els.enabled.checked ? "Etkin" : "Kapalı", els.enabled.checked ? "is-ok" : "is-warn");
-  });
+els.enabled.addEventListener("change", function () {
+      /* Not a plain "Etkin/Kapalı" toggle any more: with Vision unreachable the
+         useful thing to say is which OCR path is in play. */
+      refreshOcrStatus({ provider: els.provider.value, enabled: els.enabled.checked })
+        .catch(function () {
+          setStatus(els.enabled.checked ? "Etkin" : "Kapalı", els.enabled.checked ? "is-ok" : "is-warn");
+        });
+    });
 
   els.apiKey.addEventListener("input", scheduleKeySave);
   els.apiKey.addEventListener("change", function () {
@@ -311,10 +342,13 @@ return MangaTR.nativeAvailable().then(function (available) {
     var flushed = keyTimer ? saveKeyNow() : Promise.resolve();
     flushed.then(function () {
       return MangaTR.getSettings().then(function (settings) {
-        return persist({ provider: providerId }).then(function (next) {
-          applyProvider(providerId, next || settings);
-        });
-      });
+return persist({ provider: providerId }).then(function (next) {
+             applyProvider(providerId, next || settings);
+             /* Whether OCR has a working path at all depends on the service, so
+                the status is re-evaluated rather than left describing the old one. */
+             return refreshOcrStatus(next || settings).catch(function () {});
+           });
+       });
     }).catch(function () {
       // Already reported by saveKeyNow; restoring the stored provider keeps the
       // dropdown from claiming a switch that did not happen.

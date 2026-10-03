@@ -63,6 +63,9 @@ struct ContentView: View {
             Text("Manga ve webtoon sayfalarındaki metni gerçek zamanlıda Türkçeye çevirip sayfa üzerine yazar. Metinler cihazda (Vision) tanınır, çeviri Gemini, DeepSeek, Groq, OpenRouter veya kendi sunucun ile yapılır.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            Text("Ücretsiz Apple ID ile kurulumda Vision çalışmayabilir; bu durumda sayfa görseli parçalara bölünüp Google Gemini'ye gönderilir ve oradan okunur. Yavaştır ve görsel servise gider.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -72,6 +75,7 @@ struct ContentView: View {
                 .font(.headline)
             bullet("Balonlar boğun kaldı: eklenti kapalı olabilir, simjeye dokunup açık yap.")
             bullet("Çeviri hiç başlamıyor: eklenti simgesinde doğru servis seçili mi ve API anahtarı kaydedilmiş mi kontrol et. Test et düğmesi bağlantıyı sınar.")
+            bullet("Ekranda “cihazda OCR yok” yazıyor: Vision'a erişilemiyor. Google Gemini seçiliyse sayfa görseli Gemini'ye gönderilerek okunur (yavaş); başka bir servis seçiliyse görsel okunamadığı için çeviri olmaz — Gemini'yi seçmelisin.")
             bullet("Anahtarı kaydettikten sonra tekrar soruluyor: eklenti simgesini aç, anahtarın yanında “Kaydedildi ✓” yazmasını bekle.")
             bullet("Yanlış çeviri: eklenti ayarlarındaki dil seçimini “Otomatik algıla” yerine elle seçebilirsin.")
             bullet("Sayfa hiç değişmiyor: “Orijinali gizle” anahtarı kapalıysa MangaTR dokunmaz. Anahtar açıkken çeviri yapılır.")
