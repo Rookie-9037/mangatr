@@ -325,12 +325,13 @@ var PROVIDERS = [
     base: "https://openrouter.ai/api/v1",
     keyHint: /^sk-or-/,
     models: [
+      "openrouter/free",
       "google/gemini-2.5-flash",
       "anthropic/claude-3.5-haiku",
       "openai/gpt-4o-mini",
       "deepseek/deepseek-chat"
     ],
-    defaultModel: "google/gemini-2.5-flash",
+    defaultModel: "openrouter/free",
     system: CHAT_SYSTEM
   }),
 
@@ -576,12 +577,12 @@ var PROVIDERS = [
           hint: provider.hint,
           docsUrl: provider.docsUrl,
           keyPlaceholder: provider.keyPlaceholder,
-models: provider.models,
-             defaultModel: provider.defaultModel,
-             // The popup decides whether OCR has any path at all from this flag,
-             // so it has to survive the copy: without it every service looks
-             // image-blind and Gemini is reported as unable to read images.
-             supportsVision: !!provider.supportsVision
+          models: provider.models,
+          defaultModel: provider.defaultModel,
+          // The popup decides whether OCR has any path at all from this flag,
+          // so it has to survive the copy: without it every service looks
+          // image-blind and Gemini is reported as unable to read images.
+          supportsVision: !!provider.supportsVision
         };
       });
     },
