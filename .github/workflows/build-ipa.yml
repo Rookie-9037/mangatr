@@ -95,10 +95,20 @@ jobs:
           echo "--- eklenti kökü ---"
           ls "$EXT"
 
-          rm -rf Payload
+          rm -rf Payload MangaTR-unsigned.ipa
           mkdir Payload
           cp -R "$APP" Payload/
-          (cd Payload && zip -qry "../MangaTR-unsigned.ipa" .)
+          # Zip from *outside* Payload so entries are stored as Payload/MangaTR.app/...
+          # Sideloading tools reject the archive outright if the Payload directory
+          # is missing ("guru meditation ... can't listdir a file").
+          zip -qry MangaTR-unsigned.ipa Payload
+
+          # Fail loudly rather than shipping an IPA nothing can install.
+          if [ ! -f MangaTR-unsigned.ipa ]; then
+            echo "ipa üretilmedi"; exit 1
+          fi
+          unzip -l MangaTR-unsigned.ipa | head -3
+
           echo "ipa boyutu: $(du -h MangaTR-unsigned.ipa)"
 
       - name: .ipa'yı yükle
