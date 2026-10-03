@@ -448,7 +448,16 @@ var PROVIDERS = [
               return step();
             }
           }
-          if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
+          /* Google's per-minute limit is reported with the same RESOURCE_EXHAUSTED code as
+           * a genuinely spent quota, so the retry budget has to be decided from the
+           * message body. Retrying a dead quota is not merely useless: the two
+           * back-off attempts each take as long as the first, so the real answer
+           * arrives later, behind a wait nobody asked for. */
+          var rateLimited =
+            response.status === 429 &&
+            /per minute|per second|rate limit/i.test(String(bodyText || ""));
+          var quotaDead = response.status === 429 && !rateLimited;
+          if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES && !quotaDead) {
             attempt++;
             return sleep(600 * attempt * attempt).then(step);
           }
@@ -522,7 +531,27 @@ var PROVIDERS = [
       return "İstek reddedildi (400). Model adı veya sunucu adresi yanlış olabilir. " + detail;
     }
     if (status === 429) {
-      return "Kota doldu veya hız sınırı (429). Biraz sonra tekrar dene.";
+      /* Two completely different problems hide behind one status code, and only
+       * one of them gets better with time. Google answers with RESOURCE_EXHAUSTED
+       * either way; the message body is the only thing that separates "this
+       * minute is full, wait a minute" from "your daily allowance is gone", and
+       * telling someone to retry the latter just burns more of nothing. */
+      var lower = detail.toLowerCase();
+      var perMinute =
+        lower.indexOf("per minute") !== -1 ||
+        lower.indexOf("per second") !== -1 ||
+        lower.indexOf("rate limit") !== -1;
+      var perDay = lower.indexOf("per day") !== -1 || lower.indexOf("daily") !== -1;
+
+      if (!perMinute) {
+        return (
+          "Kota tükendi (429" + (perDay ? ", günlük" : "") + "). " + provider.label +
+          " bu anahtara daha fazla istek vermiyor; tekrar denemek aynı sonucu verir. " +
+          "Beklemek gerekiyorsa günlük sınır sıfırlanana kadar bekle, ya da ücretsiz kotolu " +
+          "başka bir servise geç (Groq, OpenRouter). " + provider.hint
+        );
+      }
+      return "Hız sınırı (429, dakikalık). Birkaç dakika sonra tekrar dene.";
     }
     if (status >= 500) {
       var walked = (tried || []).filter(function (name, index, all) {

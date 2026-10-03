@@ -242,6 +242,39 @@ send({ type: "settings:test" }).then(function (reply) {
       const MAX503 = 3 + 2 + 1;
       check("503 istek sayısı sınırlı", calls.length === MAX503, calls.length + "/" + MAX503);
 
+        /* 429 hides two unrelated problems behind one status code, and they are
+         * fixed in opposite ways: a per-minute limit clears in a minute, a spent
+         * daily quota does not clear at all. Saying "retry later" about the second
+         * one is worse than useless. */
+        seed({ provider: "gemini", model: "gemini-3.8-flash", apiKeys: { gemini: "AIzaTEST" } });
+        calls = [];
+        respondWith = () => failWith(429,
+          '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED",' +
+          '"message":"Quota exceeded for quota metric: Generate requests"}}');
+        return send({ type: "settings:test" });
+      }).then(function (reply) {
+        check("tükenen kota tükenen olarak anlatıldı",
+          reply.ok === false && /Kota tükendi/.test(reply.error), reply.error);
+        /* The point is that the *invitation* to retry is absent, not that the word cannot
+         * appear: the sentence has to mention what waiting is worth, so the check
+         * looks for the retry phrasing specifically. */
+        check("tükenen kotede tekrar denemek önerilmiyor",
+          !/biraz sonra tekrar dene/i.test(reply.error), reply.error);
+        check("tükenen kotede alternatif servis önerildi",
+          /Groq|OpenRouter/.test(reply.error), reply.error);
+        check("tükenen kota için geri çekilme yapılmadı", calls.length === 1, calls.length + " istek");
+
+        seed({ provider: "gemini", model: "gemini-3.8-flash", apiKeys: { gemini: "AIzaTEST" } });
+        calls = [];
+        respondWith = () => failWith(429,
+          '{"error":{"code":429,"message":"Resource has been exhausted ' +
+          '(e.g. check quota) per minute."}}');
+        return send({ type: "settings:test" });
+      }).then(function (reply) {
+        check("dakikalık sınır hız sınırı olarak anlatıldı",
+          reply.ok === false && /Hız sınırı/.test(reply.error), reply.error);
+        check("dakikalık sınırda tekrar deneniyor", calls.length > 1, calls.length + " istek");
+
     // ---------------------------------------------------------------- deepseek
 
     seed({ provider: "deepseek", model: "deepseek-chat", apiKeys: { deepseek: "sk-test" } });
