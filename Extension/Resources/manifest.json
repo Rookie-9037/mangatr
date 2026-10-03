@@ -1,0 +1,39 @@
+{
+  "manifest_version": 2,
+  "name": "MangaTR",
+  "version": "1.0.0",
+  "description": "Manga sayfalarındaki Japonca metni cihazda tanır, Gemini ile Türkçeye çevirir ve balonun içine yazar.",
+  "icons": {
+    "48": "icon-48.png",
+    "96": "icon-96.png",
+    "128": "icon-128.png"
+  },
+  "browser_specific_settings": {
+    "safari": {
+      "strict_min_version": "15.0"
+    }
+  },
+  "permissions": [
+    "storage",
+    "nativeMessaging",
+    "activeTab",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["bridge.js", "translator.js", "background.js"],
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["bridge.js", "ocr.js", "overlay.js", "content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "MangaTR"
+  }
+}

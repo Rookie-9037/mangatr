@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MangaTR — tarayıcı önizlemesi</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.5 -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    color: #16161a;
+    background: #f2f3f6;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 14px 20px;
+    background: #fff;
+    border-bottom: 1px solid #e2e4e9;
+  }
+  h1 { margin: 0 0 4px; font-size: 17px; }
+  .sub { margin: 0 0 12px; font-size: 12px; color: #6b6b73; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  label { display: block; font-size: 11px; font-weight: 700; color: #4a4a52; margin-bottom: 4px; }
+  input[type=file] { font-size: 12px; }
+  input[type=password], select {
+    padding: 7px 9px; border: 1px solid #d6d8dd; border-radius: 8px;
+    font: inherit; font-size: 13px; min-width: 260px;
+  }
+  button {
+    padding: 8px 14px; border: 0; border-radius: 8px;
+    background: #ff4d6d; color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  button:disabled { background: #c9ccd3; cursor: default; }
+  button.ghost { background: #fff; color: #16161a; border: 1px solid #d6d8dd; font-weight: 600; }
+  #log {
+    margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+    background: #f7f7fa; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+    color: #45454d; max-height: 130px; overflow: auto; white-space: pre-wrap;
+  }
+  main { padding: 20px; display: flex; justify-content: center; }
+  .page { position: relative; display: inline-block; line-height: 0; box-shadow: 0 4px 24px rgba(0,0,0,.14); }
+  .page img { display: block; max-width: 100%; height: auto; }
+  .page canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+  .empty { color: #8a8a92; padding: 60px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MangaTR — tarayıcı önizlemesi</h1>
+  <p class="sub">
+    Apple derlemesi olmadan aynı yerleştirme ve çeviri kodunu dener.
+    OCR burada Tesseract ile yaklaşık çalışır; iPad'deki uygulamada Vision kullanılır ve
+    dikey Japonca metni çok daha iyi tanır.
+  </p>
+
+  <div class="row">
+    <div>
+      <label for="file">Manga sayfası</label>
+      <input type="file" id="file" accept="image/*">
+    </div>
+    <div>
+      <label for="key">Gemini API anahtarı</label>
+      <input type="password" id="key" placeholder="AIza..." autocomplete="off">
+    </div>
+    <div>
+      <label for="model">Model</label>
+      <select id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+      </select>
+    </div>
+    <div>
+      <label for="scale">Yazı boyutu</label>
+      <select id="scale">
+        <option value="0.8">0.80</option>
+        <option value="1" selected>1.00</option>
+        <option value="1.2">1.20</option>
+        <option value="1.4">1.40</option>
+      </select>
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button id="run" disabled>Çevir</button>
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button id="reset" class="ghost" disabled>Orijinali göster</button>
+    </div>
+  </div>
+
+  <div id="log">Bir sayfa seç.</div>
+</header>
+
+<main>
+  <div class="page" id="page" hidden>
+    <img id="img" alt="manga sayfası">
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="empty" id="empty">Henüz sayfa yok.</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+  // translator.js beklediği tek global. Tarayıcıda eklenti deposu yok, bellekte tutuyoruz.
+  var MangaTR = {
+    DEFAULTS: { model: "gemini-2.5-flash" },
+    hash: (function () {
+      return function (text) {
+        var h = 0;
+        for (var i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
+        return String(h);
+      };
+    })(),
+    api: function () {
+      return {
+        storage: {
+          local: {
+            get: function () { return Promise.resolve({}); },
+            set: function () { return Promise.resolve(); },
+            remove: function () { return Promise.resolve(); }
+          }
+        },
+        runtime: { getManifest: function () { return { version: "preview" }; } }
+      };
+    }
+  };
+</script>
+<script src="../Extension/Resources/overlay.js"></script>
+<script src="../Extension/Resources/translator.js"></script>
+<script src="preview.js"></script>
+</body>
+</html>

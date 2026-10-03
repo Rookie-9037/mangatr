@@ -1,0 +1,101 @@
+name: Build
+
+# Mac olmadan derleme: GitHub'in macOS runner'ı Xcode'u kurar, XcodeGen projeyi
+# üretir, xcodebuild imzasız bir .ipa çıkarır. Cihaza yükleme adımı
+# Sideloadly/SideStore ile Windows'tan yapılır.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Derleme kontrolü (simülatör)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: XcodeGen kur
+        run: brew install xcodegen
+
+      - name: Projeyi üret
+        run: xcodegen generate --spec project.yml
+
+      - name: Simülatör için derle
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project MangaTR.xcodeproj \
+            -scheme MangaTR \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  ipa:
+    name: İmzasız .ipa
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: XcodeGen kur
+        run: brew install xcodegen
+
+      - name: Projeyi üret
+        run: xcodegen generate --spec project.yml
+
+      - name: Cihaz için derle
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project MangaTR.xcodeproj \
+            -scheme MangaTR \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            build
+
+      - name: .ipa paketle
+        run: |
+          APP="build/Build/Products/Release-iphoneos/MangaTR.app"
+          EXT="$APP/PlugIns/MangaTRExtension.appex"
+          test -d "$APP" || { echo "uygulama üretilmedi"; exit 1; }
+          test -d "$EXT" || { echo "Safari eklentisi gömülmedi"; exit 1; }
+
+          # Safari web extensions want manifest.json at the .appex bundle root,
+          # so fail loudly here rather than at runtime on the device.
+          if [ ! -f "$EXT/manifest.json" ]; then
+            echo "manifest.json .appex kökünde değil. İçerik:"
+            find "$EXT" -maxdepth 2 -name 'manifest.json'
+            exit 1
+          fi
+
+          node -e "JSON.parse(require('fs').readFileSync('$EXT/manifest.json','utf8')); console.log('manifest.json geçerli')"
+          echo "--- eklenti kökü ---"
+          ls "$EXT"
+
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          (cd Payload && zip -qry "../MangaTR-unsigned.ipa" .)
+          echo "ipa boyutu: $(du -h MangaTR-unsigned.ipa)"
+
+      - name: .ipa'yı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: MangaTR-unsigned-ipa
+          path: MangaTR-unsigned.ipa
+          retention-days: 30

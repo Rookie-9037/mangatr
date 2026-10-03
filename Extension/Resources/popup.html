@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MangaTR</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="mark">TR</span>
+      <div class="titles">
+        <h1>MangaTR</h1>
+        <p id="status">Yükleniyor…</p>
+      </div>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="enabled">
+      <span class="track"><span class="knob"></span></span>
+    </label>
+  </header>
+
+  <section>
+    <label class="field">
+      <span>Gemini API anahtarı</span>
+      <input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="AIza...">
+    </label>
+    <p class="hint" id="keyState">Anahtar girilmedi.</p>
+  </section>
+
+  <section>
+    <label class="field">
+      <span>Model</span>
+      <select id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash (hızlı)</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (en ucuz)</option>
+        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+      </select>
+    </label>
+  </section>
+
+  <section>
+    <label class="row">
+      <span>Yazı boyutu</span>
+      <input type="range" id="fontScale" min="0.7" max="1.4" step="0.05">
+      <b id="fontScaleValue">1.00</b>
+    </label>
+    <label class="row">
+      <span>Orijinali gizle</span>
+      <input type="checkbox" id="hideOriginal">
+    </label>
+    <label class="row">
+      <span>Durum rozeti göster</span>
+      <input type="checkbox" id="showPill">
+    </label>
+  </section>
+
+  <section class="footer">
+    <button id="clearCache" type="button">Çeviri önbelleğini temizle</button>
+    <span id="cacheSize" class="hint"></span>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
