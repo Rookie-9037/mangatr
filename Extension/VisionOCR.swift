@@ -34,7 +34,7 @@ enum VisionOCR {
     static let maxEdge: CGFloat = 2400
 
     static func run(data: Data) throws -> Result {
-        let (cgImage, pixelWidth, pixelHeight) = try prepare(data)
+        let (cgImage, pixelWidth, pixelHeight) = try prepare(data: data)
 
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
