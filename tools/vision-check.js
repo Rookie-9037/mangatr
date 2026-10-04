@@ -41,6 +41,14 @@ function visionPayload(blocks) {
   return { candidates: [{ content: { parts: [{ text: JSON.stringify({ blocks: blocks }) }] } }] };
 }
 
+/* An OpenAI-compatible reply carrying the same boxes, optionally fenced the way a
+ * small local model tends to answer. */
+function openAiVisionPayload(blocks, fenced) {
+  var text = JSON.stringify({ blocks: blocks });
+  if (fenced) text = "```json\n" + text + "\n```";
+  return { choices: [{ message: { content: text } }] };
+}
+
 const ctx = {
   console: console,
   setTimeout: setTimeout,
@@ -129,6 +137,10 @@ check("servis listesi görsel yeteneğini taşıyor", listed.gemini.supportsVisi
   String(listed.gemini.supportsVision));
 check("görsel okumayan servis doğru işaretli", listed.deepseek.supportsVision === false);
 check("görsel okumayan listede false olarak geçiyor", listed.groq.supportsVision === false);
+/* The self-hosted entry is the one that can read a page with no account at all,
+ * which is the only way around a free Apple ID not signing the Vision extension. */
+check("özel sunucu listede görsel okuyor", listed.custom.supportsVision === true,
+  String(listed.custom.supportsVision));
 
 const request = Providers.get("gemini").visionRequest(
   { b64: "AAAA", mime: "image/png" },
@@ -265,6 +277,8 @@ send({ type: "ocr:vision", image: { b64: "AAAA", mime: "image/png" } })
     check("görsel okumada 404 model değiştirdi", reply.ok === true && calls.length === 2,
       JSON.stringify(reply) + " istek=" + calls.length);
   })
+  .then(function () { return localVisionChecks(); })
+  .then(function () { return localVisionEndToEnd(); })
   .then(function () {
     console.log(failed ? "\n" + failed + " HATA" : "\nTUM TESTLER GECTI");
     process.exit(failed ? 1 : 0);
@@ -273,3 +287,141 @@ send({ type: "ocr:vision", image: { b64: "AAAA", mime: "image/png" } })
     console.log("HATA  testler coktugun: " + (error && error.stack ? error.stack : error));
     process.exit(1);
   });
+
+// ------------------------------------------------ kendi sunucun (anahtarsız)
+
+/* The local route is the only one that works without a paid Apple ID, so the
+ * pieces it leans on are checked directly rather than through the chat path: the
+ * OpenAI picture dialect, the absent Authorization header, and a vision model
+ * that is configured apart from the text one. */
+function localVisionChecks() {
+  const custom = Providers.get("custom");
+  const Translate = ctx.MangaTRTranslate;
+
+  check("özel sunucu görsel okumayı destekliyor", custom.supportsVision === true);
+  check("deepseek hâlâ görsel okumuyor", !Providers.get("deepseek").supportsVision);
+  check("groq hâlâ görsel okumuyor", !Providers.get("groq").supportsVision);
+  check("openrouter hâlâ görsel okumuyor", !Providers.get("openrouter").supportsVision);
+
+  const keyless = custom.visionRequest(
+    { b64: "AAAA", mime: "image/jpeg" },
+    "qwen2.5vl:7b",
+    "",
+    { base: "http://192.168.1.5:11434/v1/" }
+  );
+  const body = JSON.parse(keyless.init.body);
+  const parts = body.messages[0].content;
+  const picture = parts.find((p) => p.type === "image_url");
+
+  check("yerel adres kullanıldı",
+    keyless.url === "http://192.168.1.5:11434/v1/chat/completions", keyless.url);
+  /* A blank "Bearer " is answered with 401 by stricter servers, so the header has
+   * to be missing rather than empty. */
+  check("anahtarsız istekte Authorization yok",
+    keyless.init.headers.Authorization === undefined, JSON.stringify(keyless.init.headers));
+  check("görsel data URL olarak gönderiliyor",
+    !!picture && picture.image_url.url === "data:image/jpeg;base64,AAAA",
+    picture && picture.image_url.url);
+  /* OpenAI's API rejects json_object unless the word JSON is in the messages, and
+   * Ollama and LM Studio copy that rule. */
+  check("talimat JSON biçimini içeriyor",
+    parts[0].type === "text" && /JSON/.test(parts[0].text), JSON.stringify(parts[0].text.slice(0, 40)));
+  check("yerel istek sıcaklık 0", body.temperature === 0, String(body.temperature));
+  check("yerel istek JSON biçimi istiyor",
+    !!body.response_format && body.response_format.type === "json_object");
+  /* The default cap on a local server truncates the last panels of a page instead
+   * of failing, so the limit has to be asked for explicitly. */
+  check("yerel istek çıktı sınırı koyuyor", body.max_tokens === 8192, String(body.max_tokens));
+  check("çeviri sistem talimatı karışmıyor",
+    !body.messages.some((m) => m.role === "system"), JSON.stringify(body.messages.length + " mesaj"));
+
+  const withKey = custom.visionRequest(
+    { b64: "AAAA", mime: "image/png" }, "qwen2.5vl:7b", "abc", { base: "http://x/v1" }
+  );
+  check("anahtarlı istekte Authorization var",
+    withKey.init.headers.Authorization === "Bearer abc", String(withKey.init.headers.Authorization));
+
+  const parsedLocal = custom.visionParse(openAiVisionPayload(
+    [{ text: "やあ", x: 0.1, y: 0.2, w: 0.3, h: 0.05 }, { text: "  ", x: 0.1, y: 0.2, w: 0.3, h: 0.05 }],
+    true
+  ));
+  check("kod bloğu içindeki JSON ayrıştırıldı", parsedLocal.blocks.length === 1,
+    JSON.stringify(parsedLocal.blocks));
+  check("yerel yanıtta metin kırpıldı", parsedLocal.blocks[0].text === "やあ");
+  check("çöp yanıt null döndü",
+    custom.visionParse({ choices: [{ message: { content: "üzgünüm, yapamam" } }] }) === null);
+
+  const resolved = Translate.resolveSettings({
+    provider: "custom",
+    customBase: "http://localhost:11434/v1",
+    customModel: "qwen2.5:7b",
+    customVisionModel: "qwen2.5vl:7b",
+    apiKeys: {}
+  });
+  check("özel sunucuda anahtar zorunlu sayılmıyor", resolved.keyRequired === false);
+  check("görsel model ayarlardan çözümlendi", resolved.visionModel === "qwen2.5vl:7b",
+    resolved.visionModel);
+
+  return Promise.resolve();
+}
+
+function localVisionEndToEnd() {
+  seed({
+    provider: "custom",
+    customBase: "http://localhost:11434/v1",
+    customModel: "qwen2.5:7b",
+    customVisionModel: "qwen2.5vl:7b",
+    apiKeys: {}
+  });
+  calls = [];
+  respondWith = () => okJson(openAiVisionPayload([{ text: "やあ", x: 0.5, y: 0.25, w: 0.4, h: 0.05 }]));
+
+  return send({ type: "ocr:vision", image: { b64: "AAAA", mime: "image/png" } })
+    .then(function (reply) {
+      check("anahtarsız yerel görsel okuma çalıştı",
+        reply.ok === true && reply.result.blocks.length === 1, JSON.stringify(reply));
+      /* The regression this route kept hitting: the address never reached the
+       * request, so everything but Gemini died with "Sunucu adresi boş". */
+      check("yerel adrese istek gitti",
+        calls.length === 1 && calls[0].url === "http://localhost:11434/v1/chat/completions",
+        JSON.stringify(calls.map((c) => c.url)));
+      const sent = calls.length ? JSON.parse(calls[0].init.body) : {};
+      check("görsel model ayrı alandan geldi", sent.model === "qwen2.5vl:7b", sent.model);
+      check("yerel istekte anahtar header yok",
+        !calls[0].init.headers.Authorization, JSON.stringify(calls[0].init.headers));
+
+      /* Blank vision model must fall back to the text model. Sending an empty name
+       * instead would be answered with a 404 by every server. */
+      seed({
+        provider: "custom",
+        customBase: "http://localhost:11434/v1",
+        customModel: "qwen2.5vl:7b",
+        customVisionModel: "",
+        apiKeys: {}
+      });
+      calls = [];
+      return send({ type: "ocr:vision", image: { b64: "AAAA", mime: "image/png" } });
+    })
+    .then(function () {
+      check("görsel model boşsa metin modeli kullanılıyor",
+        calls.length === 1 && JSON.parse(calls[0].init.body).model === "qwen2.5vl:7b",
+        calls.length ? JSON.parse(calls[0].init.body).model : "istek yok");
+
+      seed({ provider: "custom", customBase: "", customModel: "qwen2.5vl:7b", apiKeys: {} });
+      calls = [];
+      return send({ type: "ocr:vision", image: { b64: "AAAA", mime: "image/png" } });
+    })
+    .then(function (reply) {
+      check("adres boşken anlaşılır hata verdi",
+        reply.ok === false && /Sunucu adresi boş/.test(reply.error), reply.error);
+      check("adres yokken istek atılmadı", calls.length === 0, calls.length + " istek");
+
+      /* A model that was never pulled is the most common local failure, and
+       * "bu anahtar erişemiyor" is advice that cannot work without a key. */
+      const explained = Providers.explainStatus(
+        Providers.get("custom"), 404, "model not found", "qwen2.5vl:7b", []
+      );
+      check("yerel 404 indirme komutu veriyor",
+        /ollama pull qwen2\.5vl:7b/.test(explained), explained);
+    });
+}

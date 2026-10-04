@@ -20,6 +20,9 @@
     customBaseField: document.getElementById("customBaseField"),
     customModel: document.getElementById("customModel"),
     customModelField: document.getElementById("customModelField"),
+    customVisionModel: document.getElementById("customVisionModel"),
+    customVisionModelField: document.getElementById("customVisionModelField"),
+    visionModelHint: document.getElementById("visionModelHint"),
     autoLanguage: document.getElementById("autoLanguage"),
     sourceField: document.getElementById("sourceField"),
     sourceLanguages: document.getElementById("sourceLanguages"),
@@ -162,9 +165,12 @@
     var custom = provider.id === "custom";
     els.customBaseField.hidden = !custom;
     els.customModelField.hidden = !custom;
+    els.customVisionModelField.hidden = !custom;
+    els.visionModelHint.hidden = !custom;
     if (custom && settings) {
       els.customBase.value = settings.customBase || "";
       els.customModel.value = settings.customModel || "";
+      els.customVisionModel.value = settings.customVisionModel || "";
     }
   }
 
@@ -252,15 +258,22 @@
     if (available) return null;
     var reason = MangaTR.nativeErrorText() || "bilinmeyen";
     if (provider && provider.supportsVision) {
+      /* "The image goes to the service" is only true for someone else's server.
+       * On one running on the user's own machine the page never leaves the
+       * device, and saying otherwise makes a private setup look like an upload. */
+      var where = provider.id === "custom"
+        ? "yavaş, sayfa cihazdan çıkmaz"
+        : "yavaş, görsel servise gider";
       return {
         text: "Cihazda OCR yok (" + reason + ") — sayfa görseli " + provider.label +
-          " ile okunacak (yavaş, görsel servise gider)",
+          " ile okunacak (" + where + ")",
         cls: "is-warn"
       };
     }
     return {
       text: "OCR çalışmayacak: cihazda Vision yok (" + reason + ") ve " +
-        (provider ? provider.label : "seçili servis") + " görsel okuyamaz — Google Gemini seç",
+        (provider ? provider.label : "seçili servis") +
+        " görsel okuyamaz — Google Gemini ya da kendi sunucunu seç",
       cls: "is-warn"
     };
   }
@@ -410,6 +423,10 @@ return persist({ provider: providerId }).then(function (next) {
 
   els.customModel.addEventListener("change", function () {
     persist({ customModel: els.customModel.value.trim() });
+  });
+
+  els.customVisionModel.addEventListener("change", function () {
+    persist({ customVisionModel: els.customVisionModel.value.trim() });
   });
 
   els.autoLanguage.addEventListener("change", function () {

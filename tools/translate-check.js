@@ -387,6 +387,55 @@ Translate.translate([{ id: 0, text: SPANISH }], gemini, { code: "es", label: "İ
     });
   })
   .then(function () {
+    /* Keyless is the normal case on a machine you own: the server is on the same
+     * network and has nothing to authenticate. Demanding a key here is what made
+     * the whole local route unusable while its OCR half already worked. */
+    const keyless = settings({
+      provider: "custom",
+      model: "gemini-2.5-flash",
+      customBase: "http://localhost:11434/v1",
+      customModel: "qwen2.5:14b",
+      apiKeys: {}
+    });
+    calls = [];
+    return Translate.translate([{ id: 9, text: "ANAHTARSIZ " + keyless.customModel }], keyless, {
+      code: "en",
+      label: "İngilizce"
+    }).then(function (result) {
+      check(
+        "anahtarsız özel sunucuya istek gitti",
+        calls.length === 1 && calls[0].url === "http://localhost:11434/v1/chat/completions",
+        calls.length ? calls[0].url : "istek yok"
+      );
+      check(
+        "anahtarsız istekte Authorization yok",
+        !calls[0].init.headers.Authorization,
+        JSON.stringify(calls[0].init.headers)
+      );
+      check(
+        "anahtarsız özel sunucu çevirdi",
+        result.errors.length === 0 && result.results.length === 1 && result.results[0].id === 9,
+        JSON.stringify(result)
+      );
+    });
+  })
+  .then(function () {
+    /* The other half of the exemption: a real vendor without a key must still be
+     * turned away, or a forgotten paste would look like a working setup. */
+    const noGeminiKey = settings({ provider: "gemini", apiKeys: {} });
+    calls = [];
+    return Translate.translate([{ id: 0, text: NEEDS_KEY_TEXT + " gemini" }], noGeminiKey, null).then(
+      function (result) {
+        check(
+          "gemini anahtarsız reddedildi",
+          result.errors.length === 1 && /anahtar/i.test(result.errors[0].error),
+          JSON.stringify(result.errors)
+        );
+        check("gemini anahtarsız istek atılmadı", calls.length === 0, calls.length + " istek");
+      }
+    );
+  })
+  .then(function () {
     // A half-configured custom provider must say what is missing rather than
     // failing later inside the batch runner.
     const noBase = settings({

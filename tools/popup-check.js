@@ -81,6 +81,18 @@ check(
   "özel alanlar yalnız custom'da açılıyor",
   /customBaseField\.hidden\s*=\s*!custom/.test(js) && /customModelField\.hidden\s*=\s*!custom/.test(js)
 );
+/* A local server normally keeps the two models apart -- a text model for the
+ * dialogue and a different download that can read a page -- so the picture model
+ * needs its own box. Reusing the text model's name would send a blind model and
+ * come back with a page that looks blank. */
+check("görsel model alanı var", /id="customVisionModel"/.test(html));
+check("görsel model yalnız custom'da açılıyor",
+  /customVisionModelField\.hidden\s*=\s*!custom/.test(js));
+check("görsel model kaydediliyor", /persist\(\{ customVisionModel:/.test(js));
+check("görsel model ipucu gösteriliyor", /id="visionModelHint"/.test(html));
+/* Telling someone on a self-hosted setup that their page is uploaded would be
+ * wrong in the one direction that matters to them. */
+check("yerel sunucuda sayfa cihazdan çıkmıyor deniyor", /sayfa cihazdan çıkmaz/.test(js));
 check(
   "model listesi özel sunucuda gizleniyor",
   /provider\.id === "custom"[\s\S]{0,120}modelField\.hidden = true/.test(js)
@@ -109,7 +121,7 @@ check("sınama hatası gösteriliyor", /reply && reply\.error/.test(js));
  * means no OCR at all until the service changes. */
 check("eski çıkmaz mesaj kalktı", !/uygulamayı bir kez aç/.test(js));
 check("görsel yedeğin yavaşlığı söyleniyor", /yavaş, görsel servise gider/.test(js));
-check("görsel okumayan servis uyarılıyor", /görsel okuyamaz — Google Gemini seç/.test(js));
+check("görsel okumayan servis uyarılıyor", /görsel okuyamaz — Google Gemini ya da kendi sunucunu seç/.test(js));
 check("yedek yol servis adını kullanıyor", /provider\.label/.test(js));
 check("açılışta OCR durumu hesaplanıyor", /refreshOcrStatus\(settings\)/.test(js));
 check("servis değişince OCR durumu tazeleniyor", /refreshOcrStatus\(next \|\| settings\)/.test(js));

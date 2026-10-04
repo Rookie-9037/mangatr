@@ -96,7 +96,7 @@
     "settings:test": function () {
       return MangaTR.getSettings().then(function (settings) {
         var resolved = MangaTRTranslate.resolveSettings(settings);
-        if (!resolved.key) throw new Error("Önce API anahtarı kaydet");
+        if (!resolved.key && resolved.keyRequired) throw new Error("Önce API anahtarı kaydet");
         return MangaTRProviders.probe(
           resolved.id,
           resolved.model,
@@ -112,16 +112,23 @@
     "ocr:vision": function (message) {
       return MangaTR.getSettings().then(function (settings) {
         var resolved = MangaTRTranslate.resolveSettings(settings);
-        if (!resolved.key) throw new Error("Önce API anahtarını kaydet");
+        if (!resolved.key && resolved.keyRequired) throw new Error("Önce API anahtarını kaydet");
+        if (resolved.id === "custom" && !resolved.base) {
+          throw new Error("Sunucu adresi boş. Eklenti ayarlarından OpenAI uyumlu adresi yaz.");
+        }
         if (!MangaTRProviders.visionOCR) {
           throw new Error("Bu sürümde görsel okuma yok");
         }
         return MangaTRProviders.visionOCR(
           MangaTRProviders.get(resolved.id),
-          resolved.model,
+          resolved.visionModel,
           resolved.key,
           message.image,
-          {}
+          /* The address lives only in settings, and for a self-hosted endpoint it
+           * is the only thing that says where the page image should go. Passing an
+           * empty options object is what left every non-Gemini route dead on
+           * arrival with "Sunucu adresi boş". */
+          { base: resolved.base }
         ).then(function (blocks) {
           return { blocks: blocks };
         });

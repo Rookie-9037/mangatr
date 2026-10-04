@@ -16,7 +16,7 @@ var MangaTRProviders = (function () {
    * same OpenAI chat-completions dialect, so one adapter covers all of them and
    * only the base URL differs. */
   function openAICompatible(config) {
-    return {
+    var adapter = {
       id: config.id,
       label: config.label,
       // Short names are what people recognise; the full URL goes in the hint.
@@ -26,6 +26,11 @@ var MangaTRProviders = (function () {
       keyPlaceholder: config.keyPlaceholder || "sk-…",
       models: config.models,
       defaultModel: config.defaultModel,
+      /* Opt-in per provider rather than assumed for the whole dialect. A text-only
+       * vendor on the same API shape would accept a picture, ignore it and answer
+       * as if the page had no text on it — a silent wrong result instead of an
+       * error. So DeepSeek stays out even though it speaks the same JSON. */
+      supportsVision: !!config.vision,
 
       request: function (prompt, model, key, options) {
         var settings = options || {};
@@ -35,10 +40,7 @@ var MangaTRProviders = (function () {
           url: base.replace(/\/+$/, "") + "/chat/completions",
           init: {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: "Bearer " + key
-            },
+            headers: authHeaders(key),
             body: JSON.stringify({
               model: model,
               temperature: settings.temperature == null ? 0.25 : settings.temperature,
@@ -63,6 +65,76 @@ var MangaTRProviders = (function () {
         return JSON.parse(stripFence(raw));
       }
     };
+
+    /* Ollama, LM Studio, vLLM and the rest take a picture the same way this
+     * dialect does: an inline data URL inside a user message. That is what makes
+     * running the whole extension against a server on your own machine possible,
+     * with no account and no key anywhere. */
+    if (config.vision) {
+      adapter.visionRequest = function (image, model, key, settings) {
+        if (!image || !image.b64) throw new Error("Görsel verisi yok");
+        var options = settings || {};
+        var base = options.base || config.base;
+        if (!base) throw new Error("Sunucu adresi boş");
+        return {
+          url: base.replace(/\/+$/, "") + "/chat/completions",
+          init: {
+            method: "POST",
+            headers: authHeaders(key),
+            body: JSON.stringify({
+              model: model,
+              temperature: 0,
+              // Small local models wrap JSON in prose constantly; asking for the
+              // format outright is what keeps the answer parseable.
+              response_format: { type: "json_object" },
+              // A full page of balloons is a long answer, and the default cap on a
+              // local server silently truncates the last panels instead of failing.
+              max_tokens: 8192,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: VISION_PROMPT },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: "data:" + (image.mime || "image/png") + ";base64," + image.b64
+                      }
+                    }
+                  ]
+                }
+              ]
+            })
+          }
+        };
+      };
+
+      adapter.visionParse = function (payload) {
+        var choices = (payload && payload.choices) || [];
+        var raw = choices[0] && choices[0].message && choices[0].message.content;
+        if (typeof raw !== "string" || !raw.trim()) return null;
+        var parsed;
+        try {
+          parsed = JSON.parse(stripFence(raw));
+        } catch (error) {
+          return null;
+        }
+        if (!parsed || !Array.isArray(parsed.blocks)) return null;
+        return { blocks: normaliseBlocks(parsed.blocks) };
+      };
+    }
+
+    return adapter;
+  }
+
+  /* A server on the same network has no key to check. Sending an empty
+   * Authorization is answered with 401 by strict ones, so the header is left off
+   * entirely rather than sent blank — that is the whole difference between
+   * "works with no key" and "still asks me for one". */
+  function authHeaders(key) {
+    var headers = { "Content-Type": "application/json" };
+    if (key) headers.Authorization = "Bearer " + key;
+    return headers;
   }
 
   /* Models that wrap their answer in ```json fences despite being told not to.
@@ -79,6 +151,33 @@ var MangaTRProviders = (function () {
    * turning into a balloon drawn in the wrong place. */
   function clamp01(value) {
     return Math.min(1, Math.max(0, value));
+  }
+
+  /* Both picture-reading dialects answer with the same `blocks` array once the
+   * vendor wrapper is peeled off, and both need the same cleaning afterwards:
+   * models drop balloons into whitespace-only entries, hand back coordinates as
+   * strings when a box is uncertain, and place boxes off the edge of the page. */
+  function normaliseBlocks(blocks) {
+    return blocks
+      .filter(function (block) {
+        return (
+          block &&
+          typeof block.text === "string" &&
+          block.text.trim() &&
+          [block.x, block.y, block.w, block.h].every(function (n) {
+            return typeof n === "number" && isFinite(n);
+          })
+        );
+      })
+      .map(function (block) {
+        return {
+          text: String(block.text).trim(),
+          x: clamp01(block.x),
+          y: clamp01(block.y),
+          w: clamp01(block.w),
+          h: clamp01(block.h)
+        };
+      });
   }
 
   var CHAT_SYSTEM = [
@@ -141,7 +240,11 @@ var MangaTRProviders = (function () {
     "- x, y, w, h değerleri 0 ile 1 arasında normalize edilmiştir.",
     "- x ve y kutunun SOL-ÜST köşesidir; w ve h genişlik ve yüksekliktir.",
     "- Metin yoksa blocks boş bir dizi olsun.",
-    "Sadece şu biçimde yanıt ver: {\"blocks\":[{\"text\":\"...\",\"x\":0.1,\"y\":0.2,\"w\":0.3,\"h\":0.05}]}"
+    /* The literal word "JSON" has to be in the prompt. OpenAI's own API rejects
+     * response_format json_object without it, and Ollama and LM Studio copy that
+     * rule in their compatibility layer — so a prompt that only *shows* a JSON
+     * shape would be answered with a 400 from half the servers worth supporting. */
+    "Sadece şu biçimde JSON döndür, başka hiçbir şey yazma: {\"blocks\":[{\"text\":\"...\",\"x\":0.1,\"y\":0.2,\"w\":0.3,\"h\":0.05}]}"
   ].join("\n");
 
 /* Declared as its own variable rather than inline in the list below, so the
@@ -215,28 +318,7 @@ var GEMINI = {
         try {
           var parsed = JSON.parse(stripFence(parts[j].text));
           if (parsed && Array.isArray(parsed.blocks)) {
-            return {
-              blocks: parsed.blocks
-                .filter(function (block) {
-                  return (
-                    block &&
-                    typeof block.text === "string" &&
-                    block.text.trim() &&
-                    [block.x, block.y, block.w, block.h].every(function (n) {
-                      return typeof n === "number" && isFinite(n);
-                    })
-                  );
-                })
-                .map(function (block) {
-                  return {
-                    text: String(block.text).trim(),
-                    x: clamp01(block.x),
-                    y: clamp01(block.y),
-                    w: clamp01(block.w),
-                    h: clamp01(block.h)
-                  };
-                })
-            };
+            return { blocks: normaliseBlocks(parsed.blocks) };
           }
         } catch (error) {
           /* try the next part */
@@ -336,17 +418,23 @@ var PROVIDERS = [
   }),
 
   /* Escape hatch for anyone with their own server, a proxy, or Ollama on the
-   * same network. The base URL is a setting, so no new code is needed. */
+   * same network. The base URL is a setting, so no new code is needed.
+   *
+   * This is the one OpenAI-compatible entry that reads pictures, and that is the
+   * point of it: a local vision model is what makes the extension work with no
+   * account and no key at all, which is the only way around a free Apple ID
+   * being unable to sign the Vision app extension. */
   openAICompatible({
     id: "custom",
     label: "Diğer (OpenAI uyumlu)",
-    hint: "Kendi sunucu adresin + anahtarın",
+    hint: "Kendi sunucun (Ollama, LM Studio…); yerelde anahtar gerekmez",
     base: "",
     keyHint: /./,
     keyPlaceholder: "anahtar…",
     models: [],
     defaultModel: "",
-    system: CHAT_SYSTEM
+    system: CHAT_SYSTEM,
+    vision: true
   })
 ];
 
@@ -488,7 +576,7 @@ var PROVIDERS = [
     if (!provider || !provider.supportsVision || !provider.visionRequest) {
       throw new Error(
         (provider ? provider.label : "Bu servis") +
-          " görsel okuyamıyor. OCR için Google Gemini seç."
+          " görsel okuyamıyor. OCR için Google Gemini ya da kendi sunucunu seç."
       );
     }
     return sendWith(
@@ -513,6 +601,15 @@ var PROVIDERS = [
     }
     if (status === 404) {
       var attempted = model || provider.models[0] || "?";
+      /* A self-hosted 404 almost always means the model was never pulled, not that
+       * a key lacks access — and the two need opposite advice. */
+      if (provider.id === "custom") {
+        return (
+          "Model bulunamadı: " + attempted + " (" + status + "). " +
+          "Sunucunda bu model yüklü değil. Ollama için: ollama pull " + attempted +
+          " — ya da alanı yazarken 'latest' ekini unutma."
+        );
+      }
       return (
         "Model bulunamadı: " + attempted + " (" + status + "). " +
         "Bu anahtar bu modele erişemiyor; listedeki başka bir modeli dene."

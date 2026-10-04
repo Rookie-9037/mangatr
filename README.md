@@ -12,7 +12,7 @@ yayımlanmış gibi okunur.
 | Aşama | Nerede | Ne oluyor |
 |---|---|---|
 | Görsel bulma | Content script | Sadece manga sayfası gibi büyük görselleri işler, sayfaya neredeyse dokunmaz |
-| OCR | Cihaz içi (Vision), yoksa Gemini | 10 dilli tanıma, dikey (tategaki) metin desteği. Vision çalışmıyorsa sayfa görseli seçili modele gider |
+| OCR | Cihaz içi (Vision), yoksa görsel model | 10 dilli tanıma, dikey (tategaki) metin desteği. Vision çalışmıyorsa sayfa görseli seçili modele gider |
 | Dil algılama | Content script + model | Betik imzası (kana/hangul/han) kesin, Latin diller stopword + model tahmini |
 | Kümeleştirme | Content script | Vision'ın çevirdiği satır parçaları tek balonda birleştirilir |
 | Çeviri | Seçilen servis | Gemini / DeepSeek / Groq / OpenRouter / kendi sunucun; JSON şemasıyla toplu istek |
@@ -90,8 +90,45 @@ Alternatif: [AltStore](https://altstore.io) ya da
    > Ücretsiz başlamak için **Gemini** veya **Groq** daha uygun.
    >
    > "Diğer (OpenAI uyumlu)" seçersen **Sunucu adresi** (`/v1` ile biten) ve
-   > **Model adı** kutuları açılır. Yerel sunucularda (Ollama, LM Studio) anahtar
-   > yok sayıldığı için o alana herhangi bir şey yazman yeterli.
+   > **Model adı** kutuları açılır. Yerel sunucularda (Ollama, LM Studio) API
+   > anahtarı **hiç gerekmez** — o alanı boş bırakabilirsin.
+
+## Anahtarsız kullanım: kendi sunucun
+
+Ücretsiz bir Apple ID, Safari eklentisinin `.appex` parçasını imzalayamadığı için
+cihaz içi Vision çalışmaz. Bu tek engeldir; aşılması için bir şirket hesabı
+gerekir. Hesap istemiyorsan aynı işi kendi makinende yapabilirsin: sayfayı
+okuyan ve çeviren modeli **bilgisayarında** çalıştırıp MangaTR'ın ona
+bağlanmasını sağla. Bu yol **anahtar istemez** ve sayfa görseli cihazdan hiç
+çıkmaz.
+
+```bash
+ollama pull qwen2.5vl:7b    # görsel okuyan model
+ollama pull qwen2.5:7b      # metin çeviren model
+```
+
+Sonra eklenti simgesine dokun:
+
+| Ayar | Değer |
+|---|---|
+| Servis | **Diğer (OpenAI uyumlu)** |
+| API anahtarı | boş bırak |
+| Sunucu adresi | `http://<bilgisayarın-IP'si>:11434/v1` |
+| Model adı | `qwen2.5:7b` |
+| Görsel model | `qwen2.5vl:7b` |
+
+**Görsel model** kutusunu boş bırakırsan yukarıdaki **Model adı** kullanılır.
+İkisi ayrıdır çünkü bir metin modeli görsel okuyamaz — sunucunda yalnızca
+`qwen2.5vl` indirdiysen bu kutuyu doldurman gerekir. Bilgisayarın yerelinde
+olduğu için `localhost` değil, **ağdaki IP adresini** yaz (Ollama'ya
+`OLLAMA_HOST=0.0.0.0` vermeyi unutma).
+
+iPad ile aynı Wi-Fi'a bağlı olmalı. LM Studio da aynı adresi kullanır
+(`http://<IP>:1234/v1`).
+
+> Bu yol bilgisayarın açık olduğu sürece çalışır ve yerelde bir model
+> çalıştırmak iPad'inkinden belirgin şekilde yavaştır. Ama sayfa hiçbir yere
+> gitmez.
 
 ### Apple ID hesabı
 
@@ -152,6 +189,7 @@ Eklenti simgesi (Safari'de "puzzle" veya `Aa` menüsü) üzerinden:
 | API anahtarı | Zorunlu. Seçili servisin anahtarı kaydedilir, sayfa erişemez |
 | Model | Servise göre değişir; Gemini'de `gemini-3.8-flash` varsayılan. Model erişimi anahtara göre değişir: yeni anahtarlar 2.x serisini göremez (Google 404 döner) |
 | Özel sunucu adresi / modeli | Yalnız "Özel sunucu" seçiliyken görünür |
+| Görsel model | Yalnız "Özel sunucu" seçiliyken görünür. Boşsa yukarıdaki model okur; metin modeli görsel okuyamadığı için sunucuda ayrı bir görsel model varsa buraya yazılır |
 | Kaynak dili | "Otomatik algıla" varsayılan. Elle seçim gelişmiş ayarlardadır |
 | Yazı tipi | `Otomatik` / `Yuvarlak` / `Temiz` — orijinal balon yazısına yakın |
 | Yazı boyutu | Türkçe metnin balondaki göreli boyutu, 0.7–1.4 |
@@ -175,8 +213,10 @@ Eklenti simgesi (Safari'de "puzzle" veya `Aa` menüsü) üzerinden:
   `MangaTRExtension.appex` içinde çalışır ve **ücretsiz bir Apple ID app extension
   imzalayamaz** — eklenti açılışta öldürülür (`Launched process exited during
   launch`). Bu durumda eklenti geri düşer: sayfa görseli parçalara bölünüp
-  **Gemini'ye gönderilir** ve oradan metin + konum alınır. Sonuç: görsel de
-  Google'a çıkar, yavaştır ve kutular model tahminidir; Vision kadar kesin değildir.
-  Bu yol yalnız Gemini'de çalışır, başka servisler görsel okuyamaz.
+  **seçili servise gönderilir** ve oradan metin + konum alınır. Sonuç: görsel de
+  o servise çıkar, yavaştır ve kutular model tahminidir; Vision kadar kesin
+  değildir. **Google Gemini** ve **kendi sunucun** (Ollama, LM Studio, vLLM —
+  anahtarsız) bu yolu kullanır; DeepSeek, Groq ve OpenRouter'ın modelleri görsel
+  okumadığı için listede yalnız metin modelleri var ve bu yol onlarda çalışmaz.
 - Önizleme aracı `<canvas>`, CSS arka planı veya sayfanın kendi metnini değil,
   yalnızca `<img>` içindeki görseli işler — iOS'taki seçici de aynı sınırla.

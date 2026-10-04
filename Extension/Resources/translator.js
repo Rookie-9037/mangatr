@@ -114,7 +114,17 @@ var MangaTRTranslate = (function () {
       id: provider,
       provider: providerInfo,
       key: key.trim(),
+      /* A self-hosted endpoint is on the user's own machine and has no key to
+       * check. Insisting on one here is what kept the local path unusable even
+       * though the request itself would have gone through fine. */
+      keyRequired: provider !== "custom",
       model: model,
+      /* Reading the picture is a separate model wherever the two differ, which on
+       * a local server is the normal case rather than the exception. */
+      visionModel:
+        provider === "custom"
+          ? String(settings.customVisionModel || "").trim() || model
+          : model,
       base: provider === "custom" ? String(settings.customBase || "").trim() : ""
     };
   }
@@ -223,7 +233,7 @@ var MangaTRTranslate = (function () {
     var sourceCode = source && source.code;
     var sourceLabel = source && source.label;
 
-    if (!resolved.key) {
+    if (!resolved.key && resolved.keyRequired) {
       return Promise.resolve({
         results: [],
         errors: [{ error: "API anahtarı yok. Eklenti simgesine dokun, " + resolved.provider.label + " anahtarını kaydet." }],

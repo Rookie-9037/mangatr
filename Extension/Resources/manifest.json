@@ -26,7 +26,7 @@
   "content_scripts": [
     {
       "matches": ["*://*/*"],
-      "js": ["bridge.js", "lang.js", "ocr.js", "overlay.js", "content.js"],
+      "js": ["bridge.js", "lang.js", "providers.js", "ocr.js", "overlay.js", "content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle",
       "all_frames": true

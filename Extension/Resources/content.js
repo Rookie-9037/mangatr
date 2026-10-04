@@ -332,10 +332,14 @@
         var remote = !available;
         if (remote && !nativeWarned) {
           nativeWarned = true;
+          /* Naming Gemini here was a leftover from when it was the only service
+           * that could read a picture. With a self-hosted model it is simply the
+           * wrong name, and the page image is going somewhere else entirely. */
+          var reader = MangaTRProviders.get(settings.provider);
           setPill(
             "MangaTR: cihazda OCR yok (" +
               (MangaTR.nativeErrorText() || "bilinmeyen") +
-              ") — görseli Gemini ile okuyorum",
+              ") — görseli " + reader.label + " ile okuyorum",
             true
           );
         }

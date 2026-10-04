@@ -29,6 +29,10 @@ var MangaTR = (function () {
     apiKey: "",
     customBase: "",
     customModel: "",
+    // Blank means "same as customModel". A local server normally holds the two
+    // apart -- a text model for the dialogue and a different, larger download
+    // that can actually look at a page -- so they are configured separately.
+    customVisionModel: "",
     minPixelWidth: 620,
     minPixelHeight: 400,
     autoTranslate: true,
