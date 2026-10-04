@@ -77,6 +77,7 @@ struct ContentView: View {
             bullet("Çeviri hiç başlamıyor: eklenti simgesinde doğru servis seçili mi ve API anahtarı kaydedilmiş mi kontrol et. Test et düğmesi bağlantıyı sınar.")
             bullet("Ekranda “cihazda OCR yok” yazıyor: Vision'a erişilemiyor. Google Gemini seçiliyse sayfa görseli Gemini'ye gönderilerek okunur (yavaş); başka bir servis seçiliyse görsel okunamadığı için çeviri olmaz — Gemini'yi seçmelisin.")
             bullet("Anahtarı kaydettikten sonra tekrar soruluyor: eklenti simgesini aç, anahtarın yanında “Kaydedildi ✓” yazmasını bekle.")
+            bullet("Yerel sunucuya bağlanılamıyor (Ollama, LM Studio): eklenti kendi ağındaki bir adrese bağlanmak için iOS izni ister. “MangaTR yerel ağa erişmek istiyor” uyarısı çıktığında İzin Ver seç. Reddedildiysen Ayarlar → MangaTR → Yerel Ağ kısmından aç. Düz http adres kullanıyorsan Sunucu adresi alanına https:// yazmak da işe yarayabilir.")
             bullet("Yanlış çeviri: eklenti ayarlarındaki dil seçimini “Otomatik algıla” yerine elle seçebilirsin.")
             bullet("Sayfa hiç değişmiyor: “Orijinali gizle” anahtarı kapalıysa MangaTR dokunmaz. Anahtar açıkken çeviri yapılır.")
             bullet("Metin çok büyük: eklenti ayarındaki yazı boyutunu düşür.")

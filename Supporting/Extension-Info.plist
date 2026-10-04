@@ -20,6 +20,20 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Repeated from the host app on purpose. The containing app is what iOS
+	     charges for local network access, but the extension process is the one
+	     that opens the socket, and which of the two plists is consulted has
+	     varied between iOS releases. A key is cheap; a silent block is not. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MangaTR, kendi ağındaki sunucudan çeviri ve görsel okuma yapabilmek için yerel ağa erişir. Görseller bu sunucuya gider.</string>
+	<!-- See the note in App-Info.plist. Kept identical here so the extension
+	     process has the same local-network and plaintext-HTTP allowance as the
+	     app that contains it. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

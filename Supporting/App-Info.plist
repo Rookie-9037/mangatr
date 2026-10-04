@@ -22,6 +22,24 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- iOS 14+ hides the local network behind a permission prompt. MangaTR's
+	     "custom / OpenAI-compatible" provider points at an address on the user's
+	     own network (Ollama on a laptop, LM Studio, vLLM), and Safari attributes a
+	     web extension's fetches to the containing app, so the key has to live here.
+	     Without it iOS refuses the request with no prompt at all and the extension
+	     reports a bare "load failed" with nothing in the log to explain it. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MangaTR, kendi ağındaki sunucudan çeviri ve görsel okuma yapabilmek için yerel ağa erişir. Görseller bu sunucuya gider.</string>
+	<!-- ATS refuses plaintext HTTP, and "custom / OpenAI-compatible" is almost
+	     always a bare http:// on a laptop. NSAllowsLocalNetworking is the narrow
+	     exception for exactly that: it covers local network hosts only and leaves
+	     every remote host still required to use TLS, so it does not reopen the
+	     internet-wide hole NSAllowsArbitraryLoads would. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
