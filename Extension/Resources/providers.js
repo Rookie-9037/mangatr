@@ -239,12 +239,22 @@ var MangaTRProviders = (function () {
     "- Metni gördüğün gibi yaz: çevirme, düzeltme, kısaltma yapma.",
     "- x, y, w, h değerleri 0 ile 1 arasında normalize edilmiştir.",
     "- x ve y kutunun SOL-ÜST köşesidir; w ve h genişlik ve yüksekliktir.",
+    "- w ve h değerlerini KESİNLİKLE tahmin etme; her kutunun gerçek boyutunu ölç. Hep aynı w ve h döndürmek yanlış cevaptır.",
     "- Metin yoksa blocks boş bir dizi olsun.",
     /* The literal word "JSON" has to be in the prompt. OpenAI's own API rejects
      * response_format json_object without it, and Ollama and LM Studio copy that
      * rule in their compatibility layer — so a prompt that only *shows* a JSON
-     * shape would be answered with a 400 from half the servers worth supporting. */
-    "Sadece şu biçimde JSON döndür, başka hiçbir şey yazma: {\"blocks\":[{\"text\":\"...\",\"x\":0.1,\"y\":0.2,\"w\":0.3,\"h\":0.05}]}"
+     * shape would be answered with a 400 from half the servers worth supporting.
+     *
+     * The numbers are written as <placeholders> on purpose. With a concrete
+     * sample like "x":0.1,"w":0.3,"h":0.05 a small local model copies those
+     * digits back for every block instead of measuring: measured against a
+     * known layout, qwen2.5vl:7b returned w=0.3/h=0.5-identical constants and
+     * put one caption 0.37 off. Placeholders left both position and size within
+     * tolerance, and cost nothing. */
+    "Sadece şu biçimde JSON döndür, başka hiçbir şey yazma:",
+    "{\"blocks\":[{\"text\":\"metnin kendisi\",\"x\":<sol>,\"y\":<ust>,\"w\":<genislik>,\"h\":<yukseklik>}]}",
+    "Buradaki <sol>, <ust>, <genislik>, <yukseklik> ifadeleri o sayının yerine kendi ölçtüğün gerçek sayıyı yazman gerektiği anlamına gelir."
   ].join("\n");
 
 /* Declared as its own variable rather than inline in the list below, so the
